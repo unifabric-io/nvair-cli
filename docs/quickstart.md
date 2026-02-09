@@ -90,7 +90,14 @@ Commands:
       --control-plane <node>       Control plane node name (required)
 
 Global Options:
-  -v, --verbose                    Enable verbose output (API requests, SSH details)
+  -v, --verbose                    Enable verbose logging for debugging
+                                   Prints detailed logs from:
+                                   - API requests and responses
+                                   - SSH key generation and management
+                                   - Configuration file loading and saving
+                                   - Network requests with retry information
+                                   Useful for troubleshooting authentication and
+                                   connection issues.
   -h, --help                       Show help for command
   --version                        Show version information
 ```
@@ -100,6 +107,9 @@ Global Options:
 ```bash
 # Authenticate
 nvcli login -u user@example.com -p <api-token>
+
+# Authenticate with verbose logging (for debugging)
+nvcli --verbose login -u user@example.com -p <api-token>
 
 # Validate topology config (dry-run)
 nvcli create -d examples/simple/ --dry-run
@@ -120,20 +130,51 @@ nvcli install docker -s my-cluster --version 24.0.7
 nvcli forward sync -s my-cluster --control-plane node1
 ```
 
+## Verbose Mode
+
+Enable verbose logging with the `--verbose` or `-v` global flag to get detailed information for debugging:
+
+```bash
+# Login with verbose output
+nvcli --verbose login -u user@example.com -p <api-token>
+
+# Example verbose output shows:
+# [DEBUG] [2026-02-10 10:23:45] Verbose mode enabled
+# [DEBUG] [2026-02-10 10:23:45] Login command started with username: user@example.com
+# [DEBUG] [2026-02-10 10:23:45] Flags validated successfully
+# [DEBUG] [2026-02-10 10:23:45] Step 1/6: Authenticating with API endpoint: https://air.nvidia.com/api
+# [DEBUG] [2026-02-10 10:23:45] doRequest: [Attempt 1/3] POST https://air.nvidia.com/api/v1/login/
+# [DEBUG] [2026-02-10 10:23:45] doRequest: Request body: {"username":"user@example.com","password":"..."}
+# ...
+```
+
+Verbose mode logs are printed to stderr and include timestamps. This is especially useful for:
+- Debugging authentication failures
+- Troubleshooting network connectivity issues
+- Understanding SSH key generation process
+- Inspecting API request/response details
+- Analyzing retry behavior on transient failures
+
 ## Troubleshooting
 
 ### Authentication errors
 - Ensure your API token is valid and has required scopes. Re-run `nvcli login -u <email> -p <api-token>`.
+- Use `nvcli --verbose login -u <email> -p <api-token>` to see detailed API request/response information.
 
 ### SSH connection failures
 - Verify the node's management IP is reachable from your network.
 - If firewall or network blocks exist, use a reachable bastion host or check VPN settings.
+- Use `nvcli --verbose` to check SSH key generation and registration details.
 
 ### Command timeout or unexpected errors
-- Re-run with `-v` to get verbose logs and check the API / SSH details.
+- Re-run with `--verbose` to get detailed logs including:
+  - API endpoint calls and response codes
+  - SSH key fingerprints and registration status
+  - Network retry attempts and backoff timing
+  - Configuration file operations
 
 ## Getting Help
 
-- For developer-focused setup (build, tests, CI): `docs/development.md`
+- For developer-focused setup (build, tests, CI): `docs/development/development.md`
 - For API contract and data model: `docs/design/contracts/api.md` and `docs/design/data-model.md`
 - For examples and topologies: `examples/` and `docs/design/topology-examples.md`

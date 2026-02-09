@@ -21,3 +21,6 @@ Thumbs.db
 *.local
 .env
 .env.local
+
+# Go Test
+coverage.out

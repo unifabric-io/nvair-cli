@@ -65,7 +65,7 @@ specs/[###-feature]/
 nvair-cli/
 ├── cmd/nvair/                 # main package (CLI entry)
 │   └── main.go
-├── internal/
+├── pkg/
 │   ├── config/
 │   │   ├── loader.go          # Load/save configuration JSON with perms
 │   │   └── model.go           # Config structs

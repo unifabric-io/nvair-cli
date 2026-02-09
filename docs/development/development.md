@@ -44,7 +44,7 @@ For more read the [spec-kit](https://github.com/github/spec-kit) documentation t
 
 This guide explains how to quickly develop a new feature in this project using the spec-kit toolchain.
 
-![](./images/speckit.png)
+![](./../images/speckit.png)
 
 ### 1. Create a Feature Spec and Branch
 
@@ -69,7 +69,7 @@ If you see any [NEEDS CLARIFICATION] markers, use speckit.clarify to resolve the
 ```
 Follow the prompts to make decisions until the checklist passes.
 
-## 3. Move to Planning
+### 3. Move to Planning
 
 Once requirements are clear, continue with:
 
@@ -94,3 +94,28 @@ This will auto-generate a PR, sync checklists, and track progress.
 - Specs, code, tests, and use cases should correspond one-to-one
 
 See the README or speckit help for more advanced usage.
+
+
+## PR Workflow Summary
+
+- **Trigger**: Pull Request to `main`
+
+- **Jobs (run in parallel)**:
+  - **unit-tests**: format check, build CLI, unit tests, coverage ≥ 85%, upload to Codecov
+  - **integration-tests**: build CLI, mock integration tests (required), real API tests (optional)
+  - **security**: Gosec scan, upload security report
+
+- **One-time setup**:
+  - Set `NV_AIR_USER` and `NV_AIR_TOKEN` in GitHub Actions secrets
+
+
+## Test Commands Quick Reference
+
+- **Unit Tests**  
+  `make test-unit`
+
+- **Coverage Tests**  
+  `make test-coverage` (generates `coverage.html`)
+
+- **E2E Tests**  
+  `NV_AIR_USER=changeme@xx.com NV_AIR_TOKEN=changeme make test-e2e`
