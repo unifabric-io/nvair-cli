@@ -1,0 +1,48 @@
+name: E2E Tests
+
+on:
+  workflow_call:
+    secrets:
+      NV_AIR_USER:
+        required: true
+      NV_AIR_TOKEN:
+        required: true  
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Please specify the branch to run E2E tests against'
+        required: true
+        default: 'main'
+        type: string
+  schedule:
+    - cron: '0 0 * * *'  # every day at midnight
+
+jobs:
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.event.pull_request.head.ref || github.ref_name }} 
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.25.6'
+      
+      - name: Download dependencies
+        run: go mod download
+      
+      - name: Build CLI
+        run: make build
+      
+      - name: Run E2E Tests
+        env:
+          NV_AIR_USER: ${{ secrets.NV_AIR_USER }}
+          NV_AIR_TOKEN: ${{ secrets.NV_AIR_TOKEN }}      
+        run: |
+          make test-e2e
+        continue-on-error: false

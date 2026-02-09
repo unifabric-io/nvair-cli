@@ -1,0 +1,69 @@
+name: Unit Tests
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Please specify the branch to run unit tests against'
+        required: true
+        default: 'main'
+        type: string
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.event.pull_request.head.ref || github.ref_name }}
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.25.6'
+      
+      - name: Download dependencies
+        run: go mod download
+      
+      - name: Format check
+        run: |
+          if ! gofmt -l . | grep -q .; then
+            echo "Code is properly formatted"
+          else
+            echo "Code formatting issues found:"
+            gofmt -l .
+            exit 1
+          fi
+      
+      - name: Build
+        run: make build
+      
+      - name: Run Unit Tests with Coverage
+        run: make test-unit
+      
+      - name: Check Coverage Threshold
+        run: |
+          threshold=${{ vars.COVERAGE_THRESHOLD }}
+          coverage=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+
+          echo "Code coverage: $coverage%"
+          echo "Coverage threshold: $threshold%"
+
+          if (( $(echo "$coverage < $threshold" | bc -l) )); then
+            echo "Coverage below ${threshold}% threshold"
+            exit 1
+          fi
+      
+      - name: Generate HTML Coverage Report
+        run: make test-coverage
+      
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella

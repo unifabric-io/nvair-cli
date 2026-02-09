@@ -10,7 +10,7 @@ Auto-generated from all feature plans. Last updated: 2026-01-12
 
 ```text
 cmd/nvair/
-internal/
+pkg/
 test/
 ```
 
