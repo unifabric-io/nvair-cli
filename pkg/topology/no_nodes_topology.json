@@ -1,0 +1,9 @@
+{
+  "format": "JSON",
+  "title": "no-nodes-topology",
+  "ztp": null,
+  "content": {
+    "nodes": {},
+    "links": []
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "format": "JSON",
+  "ztp": null,
+  "content": {
+    "nodes": {
+      "node-1": {
+        "name": "node-1",
+        "type": "compute"
+      }
+    },
+    "links": []
+  }
+}

@@ -1,13 +1,13 @@
-# nvcli Login Feature
+# nvair Login Feature
 
 ## Overview
 
-Provide a single sign-on flow for the nvcli command-line tool that allows a user to authenticate with their email and API token, obtain a bearer token, and automatically manage local SSH public key generation and upload. This feature is a P1 core capability for the CLI.
+Provide a single sign-on flow for the nvair command-line tool that allows a user to authenticate with their email and API token, obtain a bearer token, and automatically manage local SSH public key generation and upload. This feature is a P1 core capability for the CLI.
 
 ## User Scenarios
 
 ### Scenario A — First-time login
-- User runs `nvcli login -u user@example.com -p <api-token>`.
+- User runs `nvair login -u user@example.com -p <api-token>`.
 - The CLI generates an Ed25519 key pair if none exists, exchanges the API token for a bearer token, checks whether the public key is registered in the user's account, uploads the public key if needed, and stores credentials securely in local configuration.
 
 ### Scenario B — Subsequent login / token refresh
@@ -16,7 +16,7 @@ Provide a single sign-on flow for the nvcli command-line tool that allows a user
 ## Functional Requirements
 
 ### 1. Login exchange
-- Running `nvcli login -u <email> -p <api-token>` performs a POST to `/v1/auth/login` and either returns a bearer token (HTTP 200) or an appropriate error (e.g., 400/401).
+- Running `nvair login -u <email> -p <api-token>` performs a POST to `/v1/auth/login` and either returns a bearer token (HTTP 200) or an appropriate error (e.g., 400/401).
 - On success, the CLI saves `bearerToken` and `bearerTokenExpiresAt` in a local config file with file permissions set to 0600.
 
 ### 2. SSH key management
@@ -32,7 +32,7 @@ Provide a single sign-on flow for the nvcli command-line tool that allows a user
 ## Success Criteria
 
 - 95% of first-time logins complete within 5 seconds end-to-end under normal network conditions.
-- After login, a user can run `nvcli get simulation` and receive either a list of simulations (when available) or a clear permission/quota error.
+- After login, a user can run `nvair get simulation` and receive either a list of simulations (when available) or a clear permission/quota error.
 - The login flow creates or confirms a local key pair and ensures the private key file permissions are 0600.
 - CI must include a closed-loop test: a full login flow (with mock or test API endpoints) is executed automatically, verifying all requirements and error handling, and the test result is visible in the PR or main branch status.
 

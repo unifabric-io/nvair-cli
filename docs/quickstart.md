@@ -1,22 +1,22 @@
-# Quickstart Guide for nvair CLI Development
+# Quickstart
 
-## Project Overview
+## Overview
 
 The nvair CLI is a command-line tool that provides access to the [air.nvidia.com](https://air.nvidia.com/) platform for network simulation management. Key features:
 
-- **Authentication**: Login once, automatic credential handling
-- **Simulation Management**: Create and list network simulations
-- **Node Discovery**: View nodes within simulations with IP addresses
-- **Remote Execution**: Execute arbitrary commands on nodes via SSH
-- **Software Installation**: Batch install Docker, Kubernetes, and supporting tools
+* **Authentication**: Log in once with automatic credential handling
+* **Simulation Management**: Create, delete, and view network simulations
+* **Node Discovery**: View nodes within simulations along with their IP addresses
+* **Remote Execution**: Easily execute commands on nodes via SSH
+* **Port Forwarding**: Manage port forwarding rules more conveniently
+* **Rich Examples**: Provides example topologies for AI data center scenarios
+
 
 ## Prerequisites
 
-### System Requirements
+### Requirements
 
-For end users:
 - Linux, macOS 11+, or Windows 10+
-- Single static binary distribution (no runtime required)
 - A valid NVIDIA Air API token (for commands that access your account)
 
 ### Create NVIDIA Air API token
@@ -32,41 +32,40 @@ For end users:
 
 The following core concepts are used throughout the nvair CLI documentation and design:
 
-- **Simulation**: A Simulation is a network environment created on the NVIDIA Air platform. It contains a set of virtual Nodes and the network topology; it does not include application-level services.
+- **Simulation**: Simulation is a simulated environment created on the NVIDIA Air platform. It consists of multiple nodes and switches.
 
-- **Node**: A Node is an individual virtual device within a Simulation (for example, a GPU server, storage node, or switch). It represents infrastructure with attributes like name and management IP; it does not represent the applications running on that device.
+- **Node**: Node represents a node in the topology, such as a Linux host or a Cumulus switch.
 
-- **Service**: A Service represents a network endpoint exposed within a Simulation (for example via port forwarding or Kubernetes NodePort). It denotes an externally reachable service or rule, not the underlying Node.
-
-Short: Simulation = a network environment (many Nodes); Node = a single virtual device; Service = an externally exposed network service.
+- **Forward**: A port forwarding rule for a simulation. It maps external ports to internal ports (e.g., Kubernetes API Server and other TCP/UDP workloads).
 
 ## CLI Command Reference
 
-```text
-nvcli <command> [options]
+``` bash
+nvair <command> [options]
 
 Commands:
 
-  login                           Authenticate with NVIDIA Air platform
-      -u, --username <string>     Username (email) for authentication
-      -p, --password <string>     API token for authentication (get from https://air.nvidia.com/settings)
+  login                            Authenticate with NVIDIA Air platform
+      -u, --username <string>      Username (email) for authentication
+      -p, --password <string>      API token for authentication (get from https://air.nvidia.com/settings)
       
-  create                          Create a simulation from topology directory
-      -d, --directory <path>      Directory containing topology.json and config files
-      --dry-run                   Validate configuration files without creating simulation
+  create                           Create a simulation from topology directory
+      -d, --directory <path>       Directory containing topology.json and config files
+      --dry-run                    Validate configuration files without creating simulation
       
-  get                              Get resources (simulations, nodes, services)
+  get                              Get resources (simulations, nodes, forwards)
     simulation                     List all simulations (alias: simulations)
     node                           List nodes in a simulation (alias: nodes)
       -s, --simulation <name>      Simulation name (optional, defaults to first simulation)
-    service                        List services for a simulation (alias: services)
+    forward                        List port forward for a simulation (alias: forward)
       -s, --simulation <name>      Simulation name (optional, defaults to first simulation)
        
   delete                           Delete resources
     simulation                     Delete a simulation
       <name>                       Simulation name (required)
-    service                        Delete a service forwarding rule
-      <name>                       Service Name (required)
+    forward                        Delete a port forwarding rule
+      -p, --port <port>            Forwarding port
+      -s, --simulation <name>      Simulation name (optional, defaults to first simulation)
        
   exec                             Execute commands on nodes via SSH
       <node-name>                  Node name (required)
@@ -74,60 +73,58 @@ Commands:
       --                           Separator before command
       <command>                    Command to execute (required)
        
-  install                          Install software on simulation nodes
-    docker                         Install Docker on all nodes
+  add                              Add resources
+    forward                        Add a port forwarding rule 
       -s, --simulation <name>      Simulation name (optional, defaults to first simulation)
-      --version <string>           Docker version to install (optional)
-    kubeadm                        Install Kubernetes with kubeadm
-      -s, --simulation <name>      Simulation name (optional, defaults to first simulation)
-      --version <string>           Kubernetes version to install (optional)
-      --control-plane-node <nodes> Control plane nodes (comma-separated)
-      --worker-node <nodes>        Worker nodes (comma-separated)
-      
-  forward                          Service forwarding management
-    sync                           Sync Kubernetes NodePort services to Air
-      -s, --simulation <name>      Simulation name (optional, defaults to first simulation)
-      --control-plane <node>       Control plane node name (required)
+      -p, --port <port>            Forwarding port
 
 Global Options:
   -v, --verbose                    Enable verbose logging for debugging
-                                   Prints detailed logs from:
-                                   - API requests and responses
-                                   - SSH key generation and management
-                                   - Configuration file loading and saving
-                                   - Network requests with retry information
-                                   Useful for troubleshooting authentication and
-                                   connection issues.
   -h, --help                       Show help for command
   --version                        Show version information
 ```
+
+> The create command performs the following main steps:
+> 1. Load and validate topology configuration from the specified directory
+> 2. Create the simulation on NVIDIA Air platform
+> 3. Set simulation state to 'load' and wait for initialization jobs
+> 4. Configure SSH access through the bastion host
+> 5. Reset passwords and apply configurations to switches
+>    - This resets the bastion password to `dangerous` and the switch passwords to a known value. It does not affect normal use: password login is not used in practice, and the reset only skips the forced password-change prompt.
+> 6. Upload and apply Netplan configurations to Linux nodes
+>
+> Note: NVIDIA Air automatically provides a bastion (jump) machine in your topology as an additional built-in node for secure access to other nodes.
 
 ## Usage Examples
 
 ```bash
 # Authenticate
-nvcli login -u user@example.com -p <api-token>
+nvair login -u user@example.com -p <api-token>
 
 # Authenticate with verbose logging (for debugging)
-nvcli --verbose login -u user@example.com -p <api-token>
+nvair --verbose login -u user@example.com -p <api-token>
 
 # Validate topology config (dry-run)
-nvcli create -d examples/simple/ --dry-run
+nvair create -d examples/simple/ --dry-run
 
 # Create simulation
-nvcli create -d examples/simple/
+nvair create -d examples/simple/
 
 # List simulations
-nvcli get simulation
+nvair get simulation
+
+# Add a port forwarding rule to a simulation
+nvair add forward -p 6443
+nvair add forward -p 30032
+
+# List port forwarding rule in a simulation
+nvair get forward
+
+# Delete a port forwarding rule by service name
+nvair delete forward -p 6443
 
 # Execute command on a node
-nvcli exec node-gpu-1 -s my-cluster -- hostname
-
-# Install Docker on all nodes
-nvcli install docker -s my-cluster --version 24.0.7
-
-# Sync Kubernetes services
-nvcli forward sync -s my-cluster --control-plane node1
+nvair exec node-gpu-1 -s my-cluster -- hostname
 ```
 
 ## Verbose Mode
@@ -136,7 +133,7 @@ Enable verbose logging with the `--verbose` or `-v` global flag to get detailed 
 
 ```bash
 # Login with verbose output
-nvcli --verbose login -u user@example.com -p <api-token>
+nvair --verbose login -u user@example.com -p <api-token>
 
 # Example verbose output shows:
 # [DEBUG] [2026-02-10 10:23:45] Verbose mode enabled
@@ -158,13 +155,13 @@ Verbose mode logs are printed to stderr and include timestamps. This is especial
 ## Troubleshooting
 
 ### Authentication errors
-- Ensure your API token is valid and has required scopes. Re-run `nvcli login -u <email> -p <api-token>`.
-- Use `nvcli --verbose login -u <email> -p <api-token>` to see detailed API request/response information.
+- Ensure your API token is valid and has required scopes. Re-run `nvair login -u <email> -p <api-token>`.
+- Use `nvair --verbose login -u <email> -p <api-token> -v` to see detailed API request/response information.
 
 ### SSH connection failures
 - Verify the node's management IP is reachable from your network.
 - If firewall or network blocks exist, use a reachable bastion host or check VPN settings.
-- Use `nvcli --verbose` to check SSH key generation and registration details.
+- Use `nvair --verbose` to check SSH key generation and registration details.
 
 ### Command timeout or unexpected errors
 - Re-run with `--verbose` to get detailed logs including:
@@ -173,8 +170,8 @@ Verbose mode logs are printed to stderr and include timestamps. This is especial
   - Network retry attempts and backoff timing
   - Configuration file operations
 
-## Getting Help
+## Next Steps
 
-- For developer-focused setup (build, tests, CI): `docs/development/development.md`
-- For API contract and data model: `docs/design/contracts/api.md` and `docs/design/data-model.md`
-- For examples and topologies: `examples/` and `docs/design/topology-examples.md`
+- For example topologies and usage samples, see the [examples directory](../examples/) and [examples guide](../examples/README.md).
+- For developer-focused setup, including build, tests, and CI, see the [development guide](development/development.md).
+- For API details and the data model, see the [API contract](design/contracts/api.md) and [data model](design/data-model.md).

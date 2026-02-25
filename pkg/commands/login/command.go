@@ -1,11 +1,11 @@
-package commands
+package login
 
 import (
-	"flag"
 	"fmt"
 	"net/mail"
 	"os"
-	"strings"
+
+	"github.com/spf13/cobra"
 
 	"github.com/unifabric-io/nvair-cli/pkg/api"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
@@ -14,36 +14,34 @@ import (
 	"github.com/unifabric-io/nvair-cli/pkg/ssh"
 )
 
-// LoginCommand handles the login workflow.
-type LoginCommand struct {
+// Command handles the login workflow.
+type Command struct {
 	Username    string
 	APIToken    string
 	APIEndpoint string
+	KeyName     string
 	Verbose     bool
 }
 
-// NewLoginCommand creates a new login command.
-func NewLoginCommand() *LoginCommand {
-	return &LoginCommand{
+// NewCommand creates a new login command.
+func NewCommand() *Command {
+	return &Command{
 		APIEndpoint: "https://air.nvidia.com/api",
+		KeyName:     "nvair-cli",
 	}
 }
 
 // Register registers login command flags.
-func (lc *LoginCommand) Register(fs *flag.FlagSet) {
-	fs.StringVar(&lc.Username, "u", "", "Username/email (required)")
-	fs.StringVar(&lc.Username, "user", "", "Username/email (required)")
-	fs.StringVar(&lc.APIToken, "p", "", "API token (required)")
-	fs.StringVar(&lc.APIToken, "password", "", "API token (required)")
-	fs.StringVar(&lc.APIEndpoint, "api-endpoint", "https://air.nvidia.com/api", "API endpoint URL")
-	fs.BoolVar(&lc.Verbose, "v", false, "Enable verbose output")
-	fs.BoolVar(&lc.Verbose, "verbose", false, "Enable verbose output")
+func (lc *Command) Register(cmd *cobra.Command) {
+	flags := cmd.Flags()
+	flags.StringVarP(&lc.Username, "user", "u", lc.Username, "Username/Email (required)")
+	flags.StringVarP(&lc.APIToken, "password", "p", lc.APIToken, "API token (required)")
+	flags.StringVar(&lc.APIEndpoint, "api-endpoint", lc.APIEndpoint, "API endpoint URL")
+	flags.StringVar(&lc.KeyName, "key-name", lc.KeyName, "SSH key name to use for authentication")
 }
 
 // Execute runs the login command with the provided flags.
-// Returns nil on success or an error on failure.
-func (lc *LoginCommand) Execute() error {
-	// Enable verbose logging if requested
+func (lc *Command) Execute() error {
 	if lc.Verbose {
 		logging.SetVerbose(os.Stderr)
 		logging.Verbose("Verbose mode enabled")
@@ -51,7 +49,6 @@ func (lc *LoginCommand) Execute() error {
 
 	logging.Verbose("Login command started with username: %s", lc.Username)
 
-	// Validate required flags
 	if err := lc.validateFlags(); err != nil {
 		logging.Verbose("Flag validation failed: %v", err)
 		return err
@@ -59,7 +56,6 @@ func (lc *LoginCommand) Execute() error {
 
 	logging.Verbose("Flags validated successfully")
 
-	// Step 1: Authenticate with the platform
 	logging.Verbose("Step 1/6: Authenticating with API endpoint: %s", lc.APIEndpoint)
 	apiClient := api.NewClient(lc.APIEndpoint, "")
 	bearerToken, expiresAt, err := apiClient.AuthLogin(lc.Username, lc.APIToken)
@@ -69,7 +65,6 @@ func (lc *LoginCommand) Execute() error {
 	}
 	logging.Verbose("Authentication successful, bearer token obtained, expires at: %s", expiresAt)
 
-	// Step 2: Ensure SSH key pair exists (generate if missing)
 	logging.Verbose("Step 2/6: Ensuring SSH key pair exists")
 	keyPath, err := ssh.DefaultKeyPath()
 	if err != nil {
@@ -85,56 +80,55 @@ func (lc *LoginCommand) Execute() error {
 	}
 	logging.Verbose("SSH key pair ready, fingerprint: %s", kp.Fingerprint)
 
-	// Step 3: Create an authenticated API client for SSH key operations
 	logging.Verbose("Step 3/6: Creating authenticated API client for SSH key operations")
 	authClient := api.NewClient(lc.APIEndpoint, bearerToken)
 
-	// Step 4: Check if SSH key is already registered
 	logging.Verbose("Step 4/6: Checking if SSH key is already registered")
-	keyName := "nvair-cli"
 	keys, err := authClient.GetSSHKeys()
 	if err != nil {
-		// Log warning but continue - don't block login
-		logging.Verbose("Warning: Could not check existing SSH keys: %v", err)
-		fmt.Printf("⚠ Warning: Could not check existing SSH keys: %v\n", err)
+		logging.Error("Warning: Could not check existing SSH keys: %v", err)
 	} else {
 		logging.Verbose("Retrieved %d existing SSH keys", len(keys))
 	}
 
-	// Check if our key is already registered
-	keyExists := false
+	var existingKey *api.GetSSHKeyResponse
 	for _, key := range keys {
-		if key.Fingerprint == kp.Fingerprint {
-			keyExists = true
-			logging.Verbose("SSH key with matching fingerprint already registered")
+		if key.Name == lc.KeyName {
+			existingKey = &key
 			break
 		}
 	}
 
-	// Step 5: Upload SSH key if not already registered
-	if !keyExists {
-		logging.Verbose("Step 5/6: Uploading SSH key to platform")
-		publicKeyStr := string(kp.PublicKey)
-		_, err := authClient.CreateSSHKey(publicKeyStr, keyName)
-		if err != nil {
-			// Check if it's a 409 Conflict (key already exists)
-			if strings.Contains(err.Error(), "409") {
-				// Key exists with different fingerprint, continue
-				logging.Verbose("SSH key with same name but different fingerprint exists, continuing with login")
-				fmt.Printf("⚠ Warning: SSH key with same name but different fingerprint exists. Continuing with login.\n")
+	if existingKey != nil {
+		if existingKey.Fingerprint == kp.Fingerprint {
+			logging.Verbose("Step 5/6: SSH key with matching name and fingerprint already registered, skipping upload")
+		} else {
+			logging.Verbose("Step 5/6: SSH key with matching name but different fingerprint exists, deleting old key")
+			if err := authClient.DeleteSSHKey(existingKey.ID); err != nil {
+				logging.Info("Warning: Could not delete existing SSH key: %v", err)
 			} else {
-				// For other errors, warn but continue
-				logging.Verbose("Warning: Could not upload SSH key: %v", err)
-				fmt.Printf("⚠ Warning: Could not upload SSH key: %v\n", err)
+				logging.Verbose("Existing SSH key deleted successfully")
+				logging.Verbose("Uploading new SSH key")
+				publicKeyStr := string(kp.PublicKey)
+				if _, err := authClient.CreateSSHKey(publicKeyStr, lc.KeyName); err != nil {
+					logging.Error("Could not upload SSH key: %v", err)
+					return err
+				} else {
+					logging.Verbose("SSH key uploaded successfully")
+				}
 			}
+		}
+	} else {
+		logging.Verbose("Step 5/6: SSH key not found, uploading new key")
+		publicKeyStr := string(kp.PublicKey)
+		if _, err := authClient.CreateSSHKey(publicKeyStr, lc.KeyName); err != nil {
+			logging.Error("Could not upload SSH key: %v", err)
+			return err
 		} else {
 			logging.Verbose("SSH key uploaded successfully")
 		}
-	} else {
-		logging.Verbose("Step 5/6: Skipping SSH key upload (key already registered)")
 	}
 
-	// Step 6: Save configuration to disk
 	logging.Verbose("Step 6/6: Saving configuration to disk")
 	cfg := &config.Config{
 		Username:             lc.Username,
@@ -145,20 +139,17 @@ func (lc *LoginCommand) Execute() error {
 	}
 
 	if err := cfg.Save(); err != nil {
-		logging.Verbose("Failed to save configuration: %v", err)
+		logging.Error("Failed to save configuration: %v", err)
 		return output.NewFileError("Failed to save configuration", err)
 	}
 
-	// Step 7: Display success message
 	configPath, _ := config.ConfigPath()
-	logging.Verbose("Configuration saved to: %s", configPath)
-	fmt.Printf("✓ Login successful. Credentials saved to %s\n", configPath)
+	logging.Info("✓ Login successful. Credentials saved to %s", configPath)
 
 	return nil
 }
 
-// validateFlags validates that required flags are provided and well-formed.
-func (lc *LoginCommand) validateFlags() error {
+func (lc *Command) validateFlags() error {
 	if lc.Username == "" {
 		return output.NewValidationError("Email/username is required (-u or --user)")
 	}
@@ -167,7 +158,6 @@ func (lc *LoginCommand) validateFlags() error {
 		return output.NewValidationError("API token is required (-p or --password)")
 	}
 
-	// Basic email validation
 	if !isValidEmail(lc.Username) {
 		return output.NewValidationError(fmt.Sprintf("Invalid email format: %s", lc.Username))
 	}
@@ -175,7 +165,6 @@ func (lc *LoginCommand) validateFlags() error {
 	return nil
 }
 
-// isValidEmail performs basic email format validation.
 func isValidEmail(email string) bool {
 	_, err := mail.ParseAddress(email)
 	return err == nil

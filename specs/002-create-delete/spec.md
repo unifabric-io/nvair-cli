@@ -3,13 +3,13 @@
 **Feature Branch**: `002-create-delete`  
 **Created**: February 25, 2026  
 **Status**: Draft  
-**Input**: User description: "Implement nvcli create and nvcli delete commands"
+**Input**: User description: "Implement nvair create and nvair delete commands"
 
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Create Simulation from Topology (Priority: P1)
 
-A developer has a network topology directory with `topology.json` and configuration files. They want to deploy this topology as a simulation on the NVIDIA Air platform using the `nvcli create` command.
+A developer has a network topology directory with `topology.json` and configuration files. They want to deploy this topology as a simulation on the NVIDIA Air platform using the `nvair create` command.
 
 **Why this priority**: Creation of simulations is the primary workflow after authentication. Without this, users cannot provision network environments to work with.
 
@@ -17,9 +17,9 @@ A developer has a network topology directory with `topology.json` and configurat
 
 **Acceptance Scenarios**:
 
-1. **Given** a valid topology directory exists with `topology.json`, **When** user runs `nvcli create -d examples/simple/`, **Then** system creates simulation on NVIDIA Air and displays success message with simulation ID
-2. **Given** user is authenticated, **When** user runs `nvcli create -d examples/simple/ --dry-run`, **Then** system validates configuration without creating simulation and displays validation results
-3. **Given** topology directory is invalid, **When** user runs `nvcli create -d /invalid/path/`, **Then** system displays clear error message about missing or invalid files
+1. **Given** a valid topology directory exists with `topology.json`, **When** user runs `nvair create -d examples/simple/`, **Then** system creates simulation on NVIDIA Air and displays success message with simulation ID
+2. **Given** user is authenticated, **When** user runs `nvair create -d examples/simple/ --dry-run`, **Then** system validates configuration without creating simulation and displays validation results
+3. **Given** topology directory is invalid, **When** user runs `nvair create -d /invalid/path/`, **Then** system displays clear error message about missing or invalid files
 
 ---
 
@@ -33,8 +33,8 @@ A developer wants to validate their topology configuration without creating a si
 
 **Acceptance Scenarios**:
 
-1. **Given** a valid topology directory exists, **When** user runs `nvcli create -d examples/simple/ --dry-run`, **Then** system validates all files and displays success without making API calls
-2. **Given** an invalid topology (missing required fields), **When** user runs `nvcli create -d invalid-topology/ --dry-run`, **Then** system displays specific validation errors for each problem found
+1. **Given** a valid topology directory exists, **When** user runs `nvair create -d examples/simple/ --dry-run`, **Then** system validates all files and displays success without making API calls
+2. **Given** an invalid topology (missing required fields), **When** user runs `nvair create -d invalid-topology/ --dry-run`, **Then** system displays specific validation errors for each problem found
 
 ---
 
@@ -48,9 +48,9 @@ A user wants to remove a simulation they no longer need from the NVIDIA Air plat
 
 **Acceptance Scenarios**:
 
-1. **Given** a simulation exists on the platform, **When** user runs `nvcli delete simulation my-simulation`, **Then** system requests confirmation and deletes the simulation after user confirms
-2. **Given** a simulation exists, **When** user runs `nvcli delete simulation my-simulation` and confirms, **Then** system displays success message and simulation no longer appears in listing
-3. **Given** a simulation does not exist, **When** user runs `nvcli delete simulation nonexistent`, **Then** system displays error message indicating simulation not found
+1. **Given** a simulation exists on the platform, **When** user runs `nvair delete simulation my-simulation`, **Then** system requests confirmation and deletes the simulation after user confirms
+2. **Given** a simulation exists, **When** user runs `nvair delete simulation my-simulation` and confirms, **Then** system displays success message and simulation no longer appears in listing
+3. **Given** a simulation does not exist, **When** user runs `nvair delete simulation nonexistent`, **Then** system displays error message indicating simulation not found
 
 ---
 
@@ -64,8 +64,8 @@ A user wants to remove a specific service forwarding rule from their simulation 
 
 **Acceptance Scenarios**:
 
-1. **Given** a service forwarding rule exists, **When** user runs `nvcli delete service my-service`, **Then** system requests confirmation and deletes the service after confirmation
-2. **Given** a service does not exist, **When** user runs `nvcli delete service nonexistent`, **Then** system displays error message indicating service not found
+1. **Given** a service forwarding rule exists, **When** user runs `nvair delete service my-service`, **Then** system requests confirmation and deletes the service after confirmation
+2. **Given** a service does not exist, **When** user runs `nvair delete service nonexistent`, **Then** system displays error message indicating service not found
 
 ---
 
@@ -84,7 +84,7 @@ A user wants to remove a specific service forwarding rule from their simulation 
 
 #### Create Command
 
-- **FR-001**: System MUST accept `nvcli create -d <directory>` to create simulation from topology directory
+- **FR-001**: System MUST accept `nvair create -d <directory>` to create simulation from topology directory
 - **FR-002**: System MUST support `--dry-run` flag to validate topology without creating simulation
 - **FR-003**: System MUST load and parse `topology.json` from specified directory
 - **FR-004**: System MUST validate that all required topology files exist and are properly formatted
@@ -97,7 +97,7 @@ A user wants to remove a specific service forwarding rule from their simulation 
 
 #### Delete Simulation Command
 
-- **FR-011**: System MUST accept `nvcli delete simulation <name>` to delete a simulation
+- **FR-011**: System MUST accept `nvair delete simulation <name>` to delete a simulation
 - **FR-012**: System MUST request user confirmation before deleting simulation (safety mechanism)
 - **FR-013**: System MUST authenticate using stored bearer token from local configuration  
 - **FR-014**: System MUST submit delete request to NVIDIA Air API with simulation name
@@ -107,7 +107,7 @@ A user wants to remove a specific service forwarding rule from their simulation 
 
 #### Delete Service Command
 
-- **FR-018**: System MUST accept `nvcli delete service <name>` to delete a service forwarding rule
+- **FR-018**: System MUST accept `nvair delete service <name>` to delete a service forwarding rule
 - **FR-019**: System MUST request user confirmation before deleting service (safety mechanism)
 - **FR-020**: System MUST authenticate using stored bearer token from local configuration
 - **FR-021**: System MUST submit delete request to NVIDIA Air API with service name
@@ -145,7 +145,7 @@ A user wants to remove a specific service forwarding rule from their simulation 
 ## Assumptions
 
 - **Topology Format**: Topology directories contain a required `topology.json` file; additional YAML/config files may be optional or required based on platform standards (validation rules to be defined by API contract)
-- **Authentication State**: User must have successfully run `nvcli login` before using create/delete commands; system will error gracefully if bearer token is missing or expired
+- **Authentication State**: User must have successfully run `nvair login` before using create/delete commands; system will error gracefully if bearer token is missing or expired
 - **Confirmation Mechanism**: Confirmation prompts are interactive, expecting user to type "yes" or "no"; suitable for CLI environments but not suitable for automated/scripted contexts without stdin
 - **Error Handling**: Network errors trigger immediate failure with clear message; no automatic retry logic (retry logic exists in API client but not for these commands specifically)
 - **Naming Constraints**: Simulation and service names follow platform conventions (case-sensitive, no special characters); validation delegated to API which will return errors for invalid names
