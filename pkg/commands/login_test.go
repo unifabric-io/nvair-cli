@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
+
+	"github.com/unifabric-io/nvair-cli/pkg/testutil"
 )
 
 // TestLoginCommand_FirstTimeLogin tests a complete first-time login flow.
@@ -22,13 +25,14 @@ func TestLoginCommand_FirstTimeLogin(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 
 	// Create a mock API server
+	loginToken := testutil.MakeTestJWT(time.Now().Add(24 * time.Hour))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/login/":
 			resp := map[string]interface{}{
 				"result":  "OK",
 				"message": "Successfully logged in.",
-				"token":   "test-bearer-token",
+				"token":   loginToken,
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -173,12 +177,13 @@ func TestLoginCommand_TokenExpiry(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", originalHome)
 
+	loginToken := testutil.MakeTestJWT(time.Now().Add(24 * time.Hour))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/login/":
 			resp := map[string]interface{}{
 				"result": "OK",
-				"token":  "test-token",
+				"token":  loginToken,
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)

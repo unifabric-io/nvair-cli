@@ -13,6 +13,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/unifabric-io/nvair-cli/pkg/testutil"
 )
 
 // MockAPIServer represents a mock NVIDIA Air API server for testing
@@ -67,11 +70,12 @@ func (mas *MockAPIServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Success case
+	// Success case with a JWT token carrying a near-term expiration
+	expiresAt := time.Now().Add(24 * time.Hour)
 	resp := map[string]interface{}{
 		"result":  "OK",
 		"message": "Successfully logged in.",
-		"token":   "test-bearer-token-" + fmt.Sprintf("%d", mas.loginCalls),
+		"token":   testutil.MakeTestJWT(expiresAt),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -488,9 +492,10 @@ func TestIntegration_ExistingSSHKey(t *testing.T) {
 	mas := &MockAPIServer{}
 	mas.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/login/" {
+			expiresAt := time.Now().Add(24 * time.Hour)
 			resp := map[string]interface{}{
 				"result": "OK",
-				"token":  "test-bearer-token",
+				"token":  testutil.MakeTestJWT(expiresAt),
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)

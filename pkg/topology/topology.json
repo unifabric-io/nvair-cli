@@ -1,0 +1,41 @@
+{
+  "format": "JSON",
+  "title": "valid-test-topology",
+  "ztp": null,
+  "content": {
+    "nodes": {
+      "node-gpu-1": {
+        "name": "node-gpu-1",
+        "type": "compute",
+        "interface": "eth0",
+        "ip": "192.168.1.10/24",
+        "cpu": 4,
+        "memory": 8192,
+        "storage": 10
+      },
+      "node-gpu-2": {
+        "name": "node-gpu-2",
+        "type": "compute",
+        "interface": "eth0",
+        "ip": "192.168.1.11/24",
+        "cpu": 4,
+        "memory": 8192,
+        "storage": 10
+      }
+    },
+    "links": [
+      [
+        {
+          "interface": "eth0",
+          "node": "node-gpu-1",
+          "mac": "48:B0:2D:00:00:01"
+        },
+        {
+          "interface": "eth0",
+          "node": "node-gpu-2",
+          "mac": "48:B0:2D:00:00:02"
+        }
+      ]
+    ]
+  }
+}

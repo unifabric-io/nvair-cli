@@ -47,6 +47,10 @@ func (rc *RootCommand) Run(args []string) int {
 		return rc.handleLogin(subArgs, verbose)
 	case "logout":
 		return rc.handleLogout(subArgs, verbose)
+	case "create":
+		return rc.handleCreate(subArgs, verbose)
+	case "delete":
+		return rc.handleDelete(subArgs, verbose)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", subcommand)
 		rc.printHelp()
@@ -82,6 +86,21 @@ func (rc *RootCommand) extractVerboseFlag(args []string) (bool, []string) {
 
 // handleLogin handles the login subcommand.
 func (rc *RootCommand) handleLogin(args []string, verbose bool) int {
+	// Filter out help flags and show usage if present
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" || arg == "help" {
+			loginCmd := NewLoginCommand()
+			fs := flag.NewFlagSet("nvcli login", flag.ContinueOnError)
+			fs.Usage = func() {
+				fmt.Printf("Usage: nvcli login [options]\n\nOptions:\n")
+				fs.PrintDefaults()
+			}
+			loginCmd.Register(fs)
+			fs.Usage()
+			return 0
+		}
+	}
+
 	loginCmd := NewLoginCommand()
 	loginCmd.Verbose = verbose
 
@@ -138,6 +157,67 @@ func (rc *RootCommand) handleLogout(args []string, verbose bool) int {
 	return 0
 }
 
+// handleCreate handles the create subcommand.
+func (rc *RootCommand) handleCreate(args []string, verbose bool) int {
+	createCmd := NewCreateCommand()
+	createCmd.Verbose = verbose
+
+	// Create a flag set for the create command
+	fs := flag.NewFlagSet("nvcli create", flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Printf("Usage: nvcli create [options]\n\nOptions:\n")
+		fs.PrintDefaults()
+	}
+
+	createCmd.Register(fs)
+
+	// Parse flags
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse flags: %v\n", err)
+		return 1
+	}
+
+	// Execute create command
+	if err := createCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+
+	return 0
+}
+
+// handleDelete handles the delete subcommand.
+func (rc *RootCommand) handleDelete(args []string, verbose bool) int {
+	deleteCmd := NewDeleteCommand()
+	deleteCmd.Verbose = verbose
+
+	// Create a flag set for the delete command
+	fs := flag.NewFlagSet("nvcli delete", flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Printf("Usage: nvcli delete <simulation|service> <name> [options]\n\nOptions:\n")
+		fs.PrintDefaults()
+	}
+
+	deleteCmd.Register(fs)
+
+	// Parse flags - this extracts flags/options, not positional args
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse flags: %v\n", err)
+		return 1
+	}
+
+	// Get remaining positional arguments
+	remaining := fs.Args()
+
+	// Execute delete command with remaining positional args
+	if err := deleteCmd.Execute(remaining); err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+
+	return 0
+}
+
 // printHelp prints the help message.
 func (rc *RootCommand) printHelp() {
 	help := `nvcli - NVIDIA Virtual Air CLI
@@ -148,6 +228,8 @@ Usage:
 Commands:
   login       Authenticate with NVIDIA Virtual Air
   logout      Log out from NVIDIA Virtual Air
+  create      Create a simulation from topology
+  delete      Delete a simulation or service
   help        Show this help message
 
 Global Options:
@@ -157,6 +239,10 @@ Global Options:
 Examples:
   nvcli login -u user@example.com -p <api-token>
   nvcli --verbose login -u user@example.com -p <api-token>
+  nvcli create -d ./topology --dry-run
+  nvcli create -d ./topology
+  nvcli delete simulation my-sim
+  nvcli delete service my-service
   nvcli logout -f
 
 Documentation:

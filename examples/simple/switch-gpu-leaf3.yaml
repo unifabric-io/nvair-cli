@@ -103,8 +103,8 @@
               sudo: {}
         user:
           cumulus:
-            full-name: cumulus,,,
-            hashed-password: '*'
+            full-name: cumulus
+            hashed-password: '$6$wUQcsrp2Ci8.eyJu$LBO1RVoVwgwfGkNRUU1HP1xClLkb5hC86cV9dgwGBtQKoT9tFaQ36a4ljBq5JzowD846YBZ5zJW.WI53QxRUr1'
             role: system-admin
       api:
         state: enabled
