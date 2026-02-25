@@ -1,167 +1,126 @@
 package commands
 
 import (
-	"flag"
 	"fmt"
 	"os"
 
-	"github.com/unifabric-io/nvair-cli/pkg/logging"
+	"github.com/spf13/cobra"
+
+	createcmd "github.com/unifabric-io/nvair-cli/pkg/commands/create"
+	deletecmd "github.com/unifabric-io/nvair-cli/pkg/commands/delete"
+	logincmd "github.com/unifabric-io/nvair-cli/pkg/commands/login"
+	logoutcmd "github.com/unifabric-io/nvair-cli/pkg/commands/logout"
 	"github.com/unifabric-io/nvair-cli/pkg/output"
 )
 
 // RootCommand is the main CLI entry point.
 type RootCommand struct {
-	flagSet *flag.FlagSet
 	Verbose bool
 }
 
 // NewRootCommand creates a new root command.
 func NewRootCommand() *RootCommand {
-	return &RootCommand{
-		flagSet: flag.NewFlagSet("nvcli", flag.ContinueOnError),
-	}
+	return &RootCommand{}
 }
 
 // Run executes the CLI with the given arguments.
 // Returns 0 on success, non-zero on error.
 func (rc *RootCommand) Run(args []string) int {
-	// Handle help
-	if len(args) == 0 || (len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help")) {
-		rc.printHelp()
-		return 0
-	}
+	cmd := rc.newCommand()
+	cmd.SetArgs(args)
 
-	// Check for global --verbose flag before routing
-	verbose, remainingArgs := rc.extractVerboseFlag(args)
-	if verbose {
-		logging.SetVerbose(os.Stderr)
-		logging.Verbose("Verbose mode enabled")
-	}
-
-	// Route to subcommands
-	subcommand := remainingArgs[0]
-	subArgs := remainingArgs[1:]
-
-	switch subcommand {
-	case "login":
-		return rc.handleLogin(subArgs, verbose)
-	case "logout":
-		return rc.handleLogout(subArgs, verbose)
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", subcommand)
-		rc.printHelp()
-		return 1
-	}
-}
-
-// extractVerboseFlag extracts the --verbose flag from args and returns the verbose state
-// and the remaining arguments.
-func (rc *RootCommand) extractVerboseFlag(args []string) (bool, []string) {
-	verbose := false
-	var remaining []string
-
-	for i, arg := range args {
-		if arg == "--verbose" || arg == "-v" {
-			verbose = true
-		} else {
-			remaining = args[i:]
-			break
-		}
-	}
-
-	// If no other args after --verbose, keep the command if present
-	if len(remaining) == 0 && len(args) > 0 {
-		// Check if first arg was not --verbose, then it's the command
-		if args[0] != "--verbose" && args[0] != "-v" {
-			remaining = args
-		}
-	}
-
-	return verbose, remaining
-}
-
-// handleLogin handles the login subcommand.
-func (rc *RootCommand) handleLogin(args []string, verbose bool) int {
-	loginCmd := NewLoginCommand()
-	loginCmd.Verbose = verbose
-
-	// Create a flag set for the login command
-	fs := flag.NewFlagSet("nvcli login", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Printf("Usage: nvcli login [options]\n\nOptions:\n")
-		fs.PrintDefaults()
-	}
-
-	loginCmd.Register(fs)
-
-	// Parse flags
-	if err := fs.Parse(args); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse flags: %v\n", err)
-		return 1
-	}
-
-	// Execute login command
-	if err := loginCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", output.FormatError(err))
+	if err := cmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, output.FormatError(err))
 		return 1
 	}
 
 	return 0
 }
 
-// handleLogout handles the logout subcommand.
-func (rc *RootCommand) handleLogout(args []string, verbose bool) int {
-	logoutCmd := NewLogoutCommand()
-	logoutCmd.Verbose = verbose
-
-	// Create a flag set for the logout command
-	fs := flag.NewFlagSet("nvcli logout", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Printf("Usage: nvcli logout [options]\n\nOptions:\n")
-		fs.PrintDefaults()
+func (rc *RootCommand) newCommand() *cobra.Command {
+	rootCmd := &cobra.Command{
+		Use:           "nvair",
+		Short:         "NVIDIA Air CLI",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
 	}
 
-	logoutCmd.Register(fs)
+	rootCmd.SetOut(os.Stdout)
+	rootCmd.SetErr(os.Stderr)
+	rootCmd.PersistentFlags().BoolVarP(&rc.Verbose, "verbose", "v", false, "Enable verbose logging for detailed debugging")
+	rootCmd.AddCommand(
+		rc.newLoginCommand(),
+		rc.newLogoutCommand(),
+		rc.newCreateCommand(),
+		rc.newDeleteCommand(),
+	)
 
-	// Parse flags
-	if err := fs.Parse(args); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse flags: %v\n", err)
-		return 1
-	}
-
-	// Execute logout command
-	if err := logoutCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", output.FormatError(err))
-		return 1
-	}
-
-	return 0
+	return rootCmd
 }
 
-// printHelp prints the help message.
-func (rc *RootCommand) printHelp() {
-	help := `nvcli - NVIDIA Virtual Air CLI
+func (rc *RootCommand) newLoginCommand() *cobra.Command {
+	loginCmd := logincmd.NewCommand()
+	cmd := &cobra.Command{
+		Use:           "login",
+		Short:         "Authenticate with NVIDIA Virtual Air",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			loginCmd.Verbose = rc.Verbose
+			return loginCmd.Execute()
+		},
+	}
+	loginCmd.Register(cmd)
+	return cmd
+}
 
-Usage:
-  nvcli [global options] [command] [options]
+func (rc *RootCommand) newLogoutCommand() *cobra.Command {
+	logoutCmd := logoutcmd.NewCommand()
+	cmd := &cobra.Command{
+		Use:           "logout",
+		Short:         "Log out from NVIDIA Virtual Air",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			logoutCmd.Verbose = rc.Verbose
+			return logoutCmd.Execute()
+		},
+	}
+	logoutCmd.Register(cmd)
+	return cmd
+}
 
-Commands:
-  login       Authenticate with NVIDIA Virtual Air
-  logout      Log out from NVIDIA Virtual Air
-  help        Show this help message
+func (rc *RootCommand) newCreateCommand() *cobra.Command {
+	createCmd := createcmd.NewCommand()
+	cmd := &cobra.Command{
+		Use:           "create",
+		Short:         "Create a simulation from topology",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			createCmd.Verbose = rc.Verbose
+			return createCmd.Execute()
+		},
+	}
+	createCmd.Register(cmd)
+	return cmd
+}
 
-Global Options:
-  -v, --verbose  Enable verbose logging for detailed debugging
-  -h, --help     Show help message
-
-Examples:
-  nvcli login -u user@example.com -p <api-token>
-  nvcli --verbose login -u user@example.com -p <api-token>
-  nvcli logout -f
-
-Documentation:
-  For more information, visit: https://docs.nvidia.com/nvair/
-
-`
-	fmt.Print(help)
+func (rc *RootCommand) newDeleteCommand() *cobra.Command {
+	deleteCmd := deletecmd.NewCommand()
+	cmd := &cobra.Command{
+		Use:           "delete <simulation|service> <name>",
+		Short:         "Delete a simulation or service",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			deleteCmd.Verbose = rc.Verbose
+			return deleteCmd.Execute(args)
+		},
+	}
+	deleteCmd.Register(cmd)
+	return cmd
 }

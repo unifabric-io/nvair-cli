@@ -48,7 +48,7 @@ func Verbose(format string, args ...interface{}) {
 func Info(format string, args ...interface{}) {
 	globalLogger.mu.RLock()
 	defer globalLogger.mu.RUnlock()
-	fmt.Fprintf(globalLogger.quiet, "[INFO] %s\n", fmt.Sprintf(format, args...))
+	fmt.Fprintf(globalLogger.quiet, "%s\n", fmt.Sprintf(format, args...))
 }
 
 // Warn logs a warning message (always shown).

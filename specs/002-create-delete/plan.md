@@ -8,16 +8,16 @@
 
 ## Executive Summary
 
-The Create and Delete feature adds simulation lifecycle management to nvcli:
+The Create and Delete feature adds simulation lifecycle management to nvair:
 
-**Create Command** (`nvcli create -d <directory>$ `):
+**Create Command** (`nvair create -d <directory>$ `):
 - Loads and validates `topology.json` and configuration files from directory
 - Validates topology structure before API submission
 - Supports `--dry-run` for validation-only mode
 - Submits topology to NVIDIA Air API and returns simulation ID
 - Displays clear success/error messages with verbose logging support
 
-**Delete Command** (`nvcli delete simulation|service <name>`):
+**Delete Command** (`nvair delete simulation|service <name>`):
 - Deletes simulations or services with user confirmation
 - Validates authentication before deletion
 - Handles API errors gracefully
@@ -36,7 +36,7 @@ The Create and Delete feature adds simulation lifecycle management to nvcli:
 **Storage**: Topology files in user-provided directory (read-only), simulation metadata from API responses  
 **Testing**: `go test` with mocked API responses, golden files for topology validation examples  
 **Target Platform**: Linux, macOS, Windows (CLI)  
-**Project Type**: Single CLI application (extend existing nvcli)  
+**Project Type**: Single CLI application (extend existing nvair)  
 **Performance Goals**: 
 - Create simulation: <10 seconds (including API roundtrip)
 - Dry-run validation: <5 seconds
@@ -278,7 +278,7 @@ type ValidationError struct {
 - Dry-run success: "✓ Topology validation passed. Ready to create."
 - Validation errors: List each error with field and message
 - Network error: "✗ Failed to create simulation: <error message>"
-- Auth error: "✗ Not authenticated. Please run 'nvcli login' first."
+- Auth error: "✗ Not authenticated. Please run 'nvair login' first."
 
 **Tests**:
 - Valid topology, dry-run → validation passes, no API call
@@ -302,8 +302,8 @@ type ValidationError struct {
 - Display success/error messages
 
 **Subcommands**:
-1. `nvcli delete simulation <name>` → DELETE /v1/simulations/{id}
-2. `nvcli delete service <name>` → DELETE /v1/services/{id}
+1. `nvair delete simulation <name>` → DELETE /v1/simulations/{id}
+2. `nvair delete service <name>` → DELETE /v1/services/{id}
 
 **Workflow**:
 ```
@@ -331,7 +331,7 @@ type ValidationError struct {
 - Not found: "✗ <resource-type> '<name>' not found."
 - Network error: "✗ Failed to delete: <error message>"
 - Cancelled: "Operation cancelled."
-- Auth error: "✗ Not authenticated. Please run 'nvcli login' first."
+- Auth error: "✗ Not authenticated. Please run 'nvair login' first."
 
 **Tests**:
 - Delete simulation with confirmation "yes" → deleted

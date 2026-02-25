@@ -2,8 +2,8 @@
 
 help:
 	@echo "Available commands:"
-	@echo "  make build              - Build the nvcli binary"
-	@echo "  make install            - Install nvcli binary to GOPATH/bin"
+	@echo "  make build              - Build the nvair binary"
+	@echo "  make install            - Install nvair binary to GOPATH/bin"
 	@echo "  make test               - Run all tests (unit + integration)"
 	@echo "  make test-unit          - Run unit tests with coverage (-short -tags excluded)"
 	@echo "  make test-e2e           - Run E2E tests only (-tags=e2e)"
@@ -13,12 +13,12 @@ help:
 	@echo "  make clean              - Remove build artifacts"
 
 build:
-	@echo "Building nvcli..."
-	go build -o bin/nvcli ./cmd/nvcli
+	@echo "Building nvair..."
+	go build -o bin/nvair ./cmd/nvair
 
 install:
-	@echo "Installing nvcli..."
-	go install ./cmd/nvcli
+	@echo "Installing nvair..."
+	go install ./cmd/nvair
 
 test:
 	@echo "Running all tests..."
@@ -50,7 +50,7 @@ lint:
 
 clean:
 	@echo "Cleaning up..."
-	rm -f bin/nvcli
+	rm -f bin/nvair
 	rm -f coverage.out coverage.html
 	go clean
 
@@ -59,7 +59,7 @@ dev: fmt build test
 	@echo "Development build complete"
 
 run: build
-	./bin/nvcli help
+	./bin/nvair help
 
 # CI/CD target - runs all checks
 ci: fmt lint test-coverage

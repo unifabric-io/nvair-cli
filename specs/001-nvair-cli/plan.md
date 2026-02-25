@@ -1,6 +1,6 @@
-# Development Plan: nvcli Login Feature
+# Development Plan: nvair Login Feature
 
-**Feature**: Login Feature (nvcli login)  
+**Feature**: Login Feature (nvair login)  
 **Branch**: `001-nvair-cli`  
 **Date**: February 9, 2026  
 **Spec**: [spec.md](spec.md)  
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-The nvcli Login Feature implements a single sign-on flow that:
+The nvair Login Feature implements a single sign-on flow that:
 1. Exchanges an API token for a bearer token via POST `/v1/auth/login`
 2. Manages Ed25519 SSH key pair generation and storage
 3. Registers the public key with the platform via POST `/v1/sshkey`
@@ -163,7 +163,7 @@ Developer setup:
 **Files**: `pkg/commands/login.go`
 
 **Responsibilities**:
-- Parse `nvcli login -u <email> -p <api-token>` arguments
+- Parse `nvair login -u <email> -p <api-token>` arguments
 - Call AuthLogin via API client
 - Trigger SSH key generation if missing
 - Compute key fingerprint and check existing key
@@ -198,7 +198,7 @@ Developer setup:
 
 **Output Messages**:
 - Success: "✓ Login successful. Credentials saved to ~/.config/nvair.unifabric.io/config.json"
-- Warning: "⚠ Login successful but SSH key upload failed. Your public key may not be registered."
+- Warning: "❌ Login successful but SSH key upload failed. Your public key may not be registered."
 - Error: Clear, actionable messages for each failure scenario
 
 **Tests**:
@@ -286,7 +286,7 @@ Developer setup:
 - ✓ Confirm 95% complete in <5 seconds
 
 ### Functional Requirements
-- ✓ `nvcli login -u <email> -p <token>` exchanges token for bearer
+- ✓ `nvair login -u <email> -p <token>` exchanges token for bearer
 - ✓ Bearer token and expiry saved with 0600 perms
 - ✓ SSH key pair generated/confirmed with correct perms
 - ✓ Public key fingerprint computed and uploaded

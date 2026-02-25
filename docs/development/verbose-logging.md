@@ -9,8 +9,8 @@ The `--verbose` (or `-v`) global flag enables detailed logging for all nvair CLI
 Place the `--verbose` flag before the subcommand:
 
 ```bash
-nvcli --verbose <command> [options]
-nvcli -v <command> [options]
+nvair --verbose <command> [options]
+nvair -v <command> [options]
 ```
 
 ## Examples
@@ -18,13 +18,13 @@ nvcli -v <command> [options]
 ### Login with verbose output
 
 ```bash
-nvcli --verbose login -u user@example.com -p <api-token>
+nvair --verbose login -u user@example.com -p <api-token>
 ```
 
 ### Logout with verbose output
 
 ```bash
-nvcli --verbose logout
+nvair --verbose logout
 ```
 
 ## Log Format
@@ -80,7 +80,7 @@ Run with verbose logging to see:
 - Network error details
 
 ```bash
-nvcli --verbose login -u user@example.com -p <api-token>
+nvair --verbose login -u user@example.com -p <api-token>
 ```
 
 ### SSH Key Issues

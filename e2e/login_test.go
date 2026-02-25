@@ -12,7 +12,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	sshpkg "github.com/unifabric-io/nvair-cli/pkg/ssh"
+	"github.com/unifabric-io/nvair-cli/pkg/testutil"
 )
 
 // MockAPIServer represents a mock NVIDIA Air API server for testing
@@ -67,11 +72,12 @@ func (mas *MockAPIServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Success case
+	// Success case with a JWT token carrying a near-term expiration
+	expiresAt := time.Now().Add(24 * time.Hour)
 	resp := map[string]interface{}{
 		"result":  "OK",
 		"message": "Successfully logged in.",
-		"token":   "test-bearer-token-" + fmt.Sprintf("%d", mas.loginCalls),
+		"token":   testutil.MakeTestJWT(expiresAt),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -180,23 +186,23 @@ func (mas *MockAPIServer) Stats() map[string]int {
 // Helper function to get the CLI binary path
 func getCliBinaryPath(t *testing.T) string {
 	// Try to find the compiled binary in common locations
-	// The binary is at the project root in bin/nvcli
-	// Relative to e2e, that would be ../bin/nvcli
+	// The binary is at the project root in bin/nvair
+	// Relative to e2e, that would be ../bin/nvair
 	possiblePaths := []string{
-		"../bin/nvcli",    // From e2e (root level)
-		"bin/nvcli",       // From project root
-		"./bin/nvcli",     // From project root (explicit)
-		"../../bin/nvcli", // Fallback, in case working directory varies
+		"../bin/nvair",    // From e2e (root level)
+		"bin/nvair",       // From project root
+		"./bin/nvair",     // From project root (explicit)
+		"../../bin/nvair", // Fallback, in case working directory varies
 	}
 
 	// Get current working directory and also try from there
 	wd, err := os.Getwd()
 	if err == nil {
-		absPath := filepath.Join(wd, "bin/nvcli")
+		absPath := filepath.Join(wd, "bin/nvair")
 		possiblePaths = append(possiblePaths, absPath)
 		// Also try to find bin directory relative from different base paths
 		for _, base := range []string{filepath.Dir(wd), filepath.Dir(filepath.Dir(wd))} {
-			possiblePaths = append(possiblePaths, filepath.Join(base, "bin/nvcli"))
+			possiblePaths = append(possiblePaths, filepath.Join(base, "bin/nvair"))
 		}
 	}
 
@@ -484,31 +490,63 @@ func TestIntegration_ExistingSSHKey(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create mock server with custom GET handler
+	// Pre-create the SSH key pair that the CLI should discover, so the server can
+	// return a truly matching fingerprint and the login flow skips delete/upload.
+	keyPath := filepath.Join(tmpDir, ".ssh", "nvair.unifabric.io")
+	kp, err := sshpkg.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("Failed to generate SSH key pair: %v", err)
+	}
+	if err := kp.SaveKeyPair(keyPath); err != nil {
+		t.Fatalf("Failed to save SSH key pair: %v", err)
+	}
+
+	var getCalls int32
+	var deleteCalls int32
+	var createCalls int32
+
+	// Create mock server that returns the same fingerprint as the local key pair.
 	mas := &MockAPIServer{}
 	mas.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/login/" {
+		switch r.URL.Path {
+		case "/v1/login/":
+			expiresAt := time.Now().Add(24 * time.Hour)
 			resp := map[string]interface{}{
 				"result": "OK",
-				"token":  "test-bearer-token",
+				"token":  testutil.MakeTestJWT(expiresAt),
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(resp)
-		} else if r.URL.Path == "/v1/sshkey" {
-			if r.Method == "GET" {
-				// Return existing key with same fingerprint
+		case "/v1/sshkey", "/v1/sshkey/":
+			switch r.Method {
+			case http.MethodGet:
+				atomic.AddInt32(&getCalls, 1)
 				keys := []map[string]interface{}{
 					{
 						"id":          "existing-key-id",
 						"name":        "nvair-cli",
-						"fingerprint": "matching-fingerprint",
+						"fingerprint": kp.Fingerprint,
 					},
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(keys)
+			case http.MethodPost:
+				atomic.AddInt32(&createCalls, 1)
+				http.Error(w, "CreateSSHKey should not be called when fingerprint matches", http.StatusInternalServerError)
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
+		case "/v1/sshkey/existing-key-id/":
+			if r.Method == http.MethodDelete {
+				atomic.AddInt32(&deleteCalls, 1)
+				http.Error(w, "DeleteSSHKey should not be called when fingerprint matches", http.StatusInternalServerError)
+				return
+			}
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		default:
+			http.NotFound(w, r)
 		}
 	}))
 	defer mas.server.Close()
@@ -539,8 +577,19 @@ func TestIntegration_ExistingSSHKey(t *testing.T) {
 		t.Fatalf("Configuration file not created")
 	}
 
+	if atomic.LoadInt32(&getCalls) != 1 {
+		t.Fatalf("Expected exactly 1 SSH key lookup, got %d", atomic.LoadInt32(&getCalls))
+	}
+	if atomic.LoadInt32(&deleteCalls) != 0 {
+		t.Fatalf("Expected no SSH key deletion, got %d", atomic.LoadInt32(&deleteCalls))
+	}
+	if atomic.LoadInt32(&createCalls) != 0 {
+		t.Fatalf("Expected no SSH key creation, got %d", atomic.LoadInt32(&createCalls))
+	}
+
 	t.Logf("✓ Existing SSH key test passed")
 	t.Logf("  - Login succeeded even with existing key")
+	t.Logf("  - Existing SSH key fingerprint matched local key")
 	t.Logf("  - Verbose logs captured and verified")
 }
 
@@ -777,8 +826,8 @@ func TestIntegration_LoginLogoutFlow(t *testing.T) {
 	t.Logf("  - Configuration saved to: %s", configPath)
 	t.Logf("  - Config file size: %d bytes", len(configData))
 
-	// Step 2: Logout with force flag via compiled binary with verbose output
-	logoutResult := runCommand(t, env, "logout", "--force")
+	// Step 2: Logout via compiled binary with verbose output
+	logoutResult := runCommand(t, env, "logout")
 	logCommandOutput(t, logoutResult, "TestIntegration_LoginLogoutFlow_Logout")
 
 	if logoutResult.ExitCode != 0 {
@@ -800,7 +849,7 @@ func TestIntegration_LoginLogoutFlow(t *testing.T) {
 	t.Logf("  - Configuration file deleted")
 
 	// Step 3: Logout again (should handle gracefully) with verbose output
-	logoutResult2 := runCommand(t, env, "logout", "--force")
+	logoutResult2 := runCommand(t, env, "logout")
 	logCommandOutput(t, logoutResult2, "TestIntegration_LoginLogoutFlow_SecondLogout")
 
 	if logoutResult2.ExitCode != 0 {

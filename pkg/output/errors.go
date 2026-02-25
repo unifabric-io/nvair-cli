@@ -2,6 +2,8 @@ package output
 
 import (
 	"fmt"
+
+	"github.com/unifabric-io/nvair-cli/pkg/topology"
 )
 
 // Error represents a categorized error for user display.
@@ -104,14 +106,31 @@ func FormatError(err error) string {
 	switch e := err.(type) {
 	case *Error:
 		if e.Cause != nil {
-			return fmt.Sprintf("❌ %s: %s\n   Details: %v", e.Category, e.Message, e.Cause)
+			return fmt.Sprintf("✗ %s: %s\n   Details: %v", e.Category, e.Message, e.Cause)
 		}
-		return fmt.Sprintf("❌ %s: %s", e.Category, e.Message)
+		return fmt.Sprintf("✗ %s: %s", e.Category, e.Message)
 
 	case *PartialError:
-		return fmt.Sprintf("⚠ %s\n   %s", e.Message, e.Details)
+		return fmt.Sprintf("✗ %s\n   %s", e.Message, e.Details)
 
 	default:
-		return fmt.Sprintf("❌ Error: %v", err)
+		return fmt.Sprintf("✗ Error: %v", err)
 	}
+}
+
+// FormatValidationErrors formats topology validation errors for user display
+func FormatValidationErrors(errors []topology.ValidationError) string {
+	if len(errors) == 0 {
+		return ""
+	}
+
+	output := "✗ Topology validation failed:\n"
+	for _, err := range errors {
+		if err.Field != "" {
+			output += fmt.Sprintf("  - %s: %s\n", err.Field, err.Message)
+		} else {
+			output += fmt.Sprintf("  - %s\n", err.Message)
+		}
+	}
+	return output
 }
