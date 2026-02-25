@@ -15,10 +15,10 @@
 
 **Purpose**: Initialize project structure and dependencies
 
-- [ ] T001 Create topology package directory structure at `pkg/topology/`
-- [ ] T002 Create create and delete command file stub at `pkg/commands/create.go` and `pkg/commands/delete.go`
-- [ ] T003 Create test fixtures directory at `tests/fixtures/` with sample topologies
-- [ ] T004 [P] Update `go.mod` to add required dependencies (gopkg.in/yaml.v3 if needed)
+- [X] T001 Create topology package directory structure at `pkg/topology/`
+- [X] T002 Create create and delete command file stub at `pkg/commands/create.go` and `pkg/commands/delete.go`
+- [X] T003 Create test fixtures directory at `tests/fixtures/` with sample topologies
+- [X] T004 [P] Update `go.mod` to add required dependencies (gopkg.in/yaml.v3 if needed)
 
 ---
 
@@ -28,19 +28,19 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T005 Define topology data types in `pkg/topology/types.go`
+- [X] T005 Define topology data types in `pkg/topology/types.go`
   - Topology, Node, Link, Service, ValidationError structs
-- [ ] T006 Implement topology loader in `pkg/topology/loader.go`
+- [X] T006 Implement topology loader in `pkg/topology/loader.go`
   - LoadTopologyFromDirectory(), load topology.json files
   - Basic error handling for missing files
-- [ ] T007 Implement topology validator in `pkg/topology/validator.go`
+- [X] T007 Implement topology validator in `pkg/topology/validator.go`
   - ValidateTopology() function
   - Check required fields (name, nodes)
   - Return collection of validation errors
-- [ ] T008 [P] Extend API client with create/delete methods in `pkg/api/client.go`
+- [X] T008 [P] Extend API client with create/delete methods in `pkg/api/client.go`
   - CreateSimulation() method signature
   - DeleteSimulation() and DeleteService() method signatures
-- [ ] T009 Add topology validation error formatting in `pkg/output/errors.go`
+- [X] T009 Add topology validation error formatting in `pkg/output/errors.go`
   - FormatValidationErrors() function
   - Structured error display with field names
 
@@ -56,28 +56,28 @@
 
 ### Tests for User Story 1 (Optional but recommended)
 
-- [ ] T010 [P] [US1] Unit test: topology loader handles valid topology in `tests/unit/topology_loader_test.go`
-- [ ] T011 [P] [US1] Unit test: all validation rules in `tests/unit/topology_validator_test.go`
-- [ ] T012 [P] [US1] Unit test: create command flag parsing in `tests/unit/create_command_test.go`
-- [ ] T013 [US1] Integration test: end-to-end create workflow with mocked API in `tests/integration/create_test.go`
+- [X] T010 [P] [US1] Unit test: topology loader handles valid topology in `tests/unit/topology_loader_test.go`
+- [X] T011 [P] [US1] Unit test: all validation rules in `tests/unit/topology_validator_test.go`
+- [X] T012 [P] [US1] Unit test: create command flag parsing in `tests/unit/create_command_test.go`
+- [X] T013 [US1] Integration test: end-to-end create workflow with mocked API in `tests/integration/create_test.go`
 
 ### Implementation for User Story 1
 
-- [ ] T014 [P] [US1] Implement CreateCommand struct and Register() in `pkg/commands/create.go`
-- [ ] T015 [P] [US1] Parse `-d` directory flag in create command
-- [ ] T016 [P] [US1] Implement dry-run flag handling (`--dry-run`) in create command
-- [ ] T017 [US1] Implement directory validation in create command (check directory exists)
-- [ ] T018 [US1] Integrate topology loader in create command workflow
-- [ ] T019 [US1] Integrate topology validator in create command (display validation errors on failure)
-- [ ] T020 [US1] Implement authentication check before API call in create command
-- [ ] T021 [US1] Implement CreateSimulation() API call in `pkg/api/client.go`
+- [X] T014 [P] [US1] Implement CreateCommand struct and Register() in `pkg/commands/create.go`
+- [X] T015 [P] [US1] Parse `-d` directory flag in create command
+- [X] T016 [P] [US1] Implement dry-run flag handling (`--dry-run`) in create command
+- [X] T017 [US1] Implement directory validation in create command (check directory exists)
+- [X] T018 [US1] Integrate topology loader in create command workflow
+- [X] T019 [US1] Integrate topology validator in create command (display validation errors on failure)
+- [X] T020 [US1] Implement authentication check before API call in create command
+- [X] T021 [US1] Implement CreateSimulation() API call in `pkg/api/client.go`
   - HTTP POST to `/v1/simulations` with topology payload
   - Error handling and retry logic
-- [ ] T022 [US1] Implement success message formatting in create command
+- [X] T022 [US1] Implement success message formatting in create command
   - Display "✓ Simulation created successfully. ID: <id>, Name: <name>"
-- [ ] T023 [US1] Add verbose logging for create command
+- [X] T023 [US1] Add verbose logging for create command
   - Log topology loading steps, validation, API calls
-- [ ] T024 [US1] Register "create" subcommand in `pkg/commands/root.go`
+- [X] T024 [US1] Register "create" subcommand in `pkg/commands/root.go`
 
 **Checkpoint**: User Story 1 complete - users can create simulations and receive confirmation
 
@@ -91,18 +91,18 @@
 
 ### Tests for User Story 2
 
-- [ ] T025 [P] [US2] Unit test: validation error message formatting in `tests/unit/validation_test.go`
-- [ ] T026 [P] [US2] Unit test: dry-run prevents API calls in `tests/unit/create_dryrun_test.go`
-- [ ] T027 [US2] Integration test: dry-run with invalid topology in `tests/integration/dryrun_test.go`
+- [X] T025 [P] [US2] Unit test: validation error message formatting in `tests/unit/validation_test.go`
+- [X] T026 [P] [US2] Unit test: dry-run prevents API calls in `tests/unit/create_dryrun_test.go`
+- [X] T027 [US2] Integration test: dry-run with invalid topology in `tests/integration/dryrun_test.go`
 
 ### Implementation for User Story 2
 
-- [ ] T028 [US2] Implement dry-run logic in create command (skip API when flag set)
-- [ ] T029 [US2] Implement validation summary display for dry-run
+- [X] T028 [US2] Implement dry-run logic in create command (skip API when flag set)
+- [X] T029 [US2] Implement validation summary display for dry-run
   - Show "✓ Topology validation passed. Ready to create." on success
   - Show all validation errors with field names on failure
-- [ ] T030 [US2] Add timing info to validation (log duration in verbose mode)
-- [ ] T031 [US2] Add verbose logging for validation steps
+- [X] T030 [US2] Add timing info to validation (log duration in verbose mode)
+- [X] T031 [US2] Add verbose logging for validation steps
   - Log each file being checked, validation rules applied
 
 **Checkpoint**: User Story 2 complete - users can validate topologies before creation
@@ -117,30 +117,30 @@
 
 ### Tests for User Story 3
 
-- [ ] T032 [P] [US3] Unit test: confirmation prompt parsing in `tests/unit/delete_confirm_test.go`
-- [ ] T033 [P] [US3] Unit test: delete command flag parsing in `tests/unit/delete_command_test.go`
-- [ ] T034 [US3] Integration test: delete simulation with mocked API in `tests/integration/delete_simulation_test.go`
-- [ ] T035 [US3] Integration test: delete with confirmation cancellation in `tests/integration/delete_cancel_test.go`
+- [X] T032 [P] [US3] Unit test: confirmation prompt parsing in `tests/unit/delete_confirm_test.go`
+- [X] T033 [P] [US3] Unit test: delete command flag parsing in `tests/unit/delete_command_test.go`
+- [X] T034 [US3] Integration test: delete simulation with mocked API in `tests/integration/delete_simulation_test.go`
+- [X] T035 [US3] Integration test: delete with confirmation cancellation in `tests/integration/delete_cancel_test.go`
 
 ### Implementation for User Story 3
 
-- [ ] T036 [P] [US3] Implement DeleteCommand struct and Register() in `pkg/commands/delete.go`
-- [ ] T037 [P] [US3] Parse subcommand "simulation" in delete command
-- [ ] T038 [P] [US3] Parse resource name argument in delete command
-- [ ] T039 [US3] Implement user confirmation prompt for simulation deletion
+- [X] T036 [P] [US3] Implement DeleteCommand struct and Register() in `pkg/commands/delete.go`
+- [X] T037 [P] [US3] Parse subcommand "simulation" in delete command
+- [X] T038 [P] [US3] Parse resource name argument in delete command
+- [X] T039 [US3] Implement user confirmation prompt for simulation deletion
   - Prompt format: "Delete simulation '<name>'? (yes/no): "
   - Accept variations: yes, y, Yes, YES (same for no)
-- [ ] T040 [US3] Implement authentication check before API call in delete command
-- [ ] T041 [US3] Implement DeleteSimulation() API call in `pkg/api/client.go`
+- [X] T040 [US3] Implement authentication check before API call in delete command
+- [X] T041 [US3] Implement DeleteSimulation() API call in `pkg/api/client.go`
   - HTTP DELETE to `/v1/simulations/{id}` (or by name per API contract)
   - Handle 404 Not Found error
   - Error handling and retry logic
-- [ ] T042 [US3] Implement success message for simulation deletion
+- [X] T042 [US3] Implement success message for simulation deletion
   - Display "✓ Simulation '<name>' deleted successfully."
-- [ ] T043 [US3] Implement cancellation message
+- [X] T043 [US3] Implement cancellation message
   - Display "Operation cancelled." when user declines
-- [ ] T044 [US3] Add verbose logging for delete simulation operation
-- [ ] T045 [US3] Register "delete" subcommand in `pkg/commands/root.go` (if not done in Phase 4)
+- [X] T044 [US3] Add verbose logging for delete simulation operation
+- [X] T045 [US3] Register "delete" subcommand in `pkg/commands/root.go` (if not done in Phase 4)
 
 **Checkpoint**: User Story 3 complete - users can delete simulations with confirmation
 
@@ -159,17 +159,17 @@
 
 ### Implementation for User Story 4
 
-- [ ] T048 [P] [US4] Parse "service" subcommand in delete command
-- [ ] T049 [P] [US4] Parse service name argument in delete command
-- [ ] T050 [US4] Implement user confirmation prompt for service deletion
+- [X] T048 [P] [US4] Parse "service" subcommand in delete command
+- [X] T049 [P] [US4] Parse service name argument in delete command
+- [X] T050 [US4] Implement user confirmation prompt for service deletion
   - Prompt format: "Delete service '<name>'? (yes/no): "
-- [ ] T051 [US4] Implement DeleteService() API call in `pkg/api/client.go`
+- [X] T051 [US4] Implement DeleteService() API call in `pkg/api/client.go`
   - HTTP DELETE to `/v1/services/{id}` (or by name per API contract)
   - Handle 404 Not Found error
   - Error handling and retry logic
-- [ ] T052 [US4] Implement success/cancellation messages for service deletion
-- [ ] T053 [US4] Add verbose logging for delete service operation
-- [ ] T054 [US4] Test both subcommands through root command router
+- [X] T052 [US4] Implement success/cancellation messages for service deletion
+- [X] T053 [US4] Add verbose logging for delete service operation
+- [X] T054 [US4] Test both subcommands through root command router
 
 **Checkpoint**: User Story 4 complete - users can delete services and simulations
 

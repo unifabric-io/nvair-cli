@@ -2,6 +2,8 @@ package output
 
 import (
 	"fmt"
+
+	"github.com/unifabric-io/nvair-cli/pkg/topology"
 )
 
 // Error represents a categorized error for user display.
@@ -114,4 +116,21 @@ func FormatError(err error) string {
 	default:
 		return fmt.Sprintf("❌ Error: %v", err)
 	}
+}
+
+// FormatValidationErrors formats topology validation errors for user display
+func FormatValidationErrors(errors []topology.ValidationError) string {
+	if len(errors) == 0 {
+		return ""
+	}
+
+	output := "✗ Topology validation failed:\n"
+	for _, err := range errors {
+		if err.Field != "" {
+			output += fmt.Sprintf("  - %s: %s\n", err.Field, err.Message)
+		} else {
+			output += fmt.Sprintf("  - %s\n", err.Message)
+		}
+	}
+	return output
 }

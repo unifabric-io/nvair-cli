@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/mail"
 	"os"
-	"strings"
 
 	"github.com/unifabric-io/nvair-cli/pkg/api"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
@@ -19,6 +18,7 @@ type LoginCommand struct {
 	Username    string
 	APIToken    string
 	APIEndpoint string
+	KeyName     string
 	Verbose     bool
 }
 
@@ -26,6 +26,7 @@ type LoginCommand struct {
 func NewLoginCommand() *LoginCommand {
 	return &LoginCommand{
 		APIEndpoint: "https://air.nvidia.com/api",
+		KeyName:     "nvair-cli",
 	}
 }
 
@@ -36,6 +37,7 @@ func (lc *LoginCommand) Register(fs *flag.FlagSet) {
 	fs.StringVar(&lc.APIToken, "p", "", "API token (required)")
 	fs.StringVar(&lc.APIToken, "password", "", "API token (required)")
 	fs.StringVar(&lc.APIEndpoint, "api-endpoint", "https://air.nvidia.com/api", "API endpoint URL")
+	fs.StringVar(&lc.KeyName, "key-name", "nvair-cli", "SSH key name to use for authentication")
 	fs.BoolVar(&lc.Verbose, "v", false, "Enable verbose output")
 	fs.BoolVar(&lc.Verbose, "verbose", false, "Enable verbose output")
 }
@@ -91,7 +93,6 @@ func (lc *LoginCommand) Execute() error {
 
 	// Step 4: Check if SSH key is already registered
 	logging.Verbose("Step 4/6: Checking if SSH key is already registered")
-	keyName := "nvair-cli"
 	keys, err := authClient.GetSSHKeys()
 	if err != nil {
 		// Log warning but continue - don't block login
@@ -101,37 +102,49 @@ func (lc *LoginCommand) Execute() error {
 		logging.Verbose("Retrieved %d existing SSH keys", len(keys))
 	}
 
-	// Check if our key is already registered
-	keyExists := false
+	// Find existing key with matching name
+	var existingKey *api.GetSSHKeyResponse
 	for _, key := range keys {
-		if key.Fingerprint == kp.Fingerprint {
-			keyExists = true
-			logging.Verbose("SSH key with matching fingerprint already registered")
+		if key.Name == lc.KeyName {
+			existingKey = &key
 			break
 		}
 	}
 
-	// Step 5: Upload SSH key if not already registered
-	if !keyExists {
-		logging.Verbose("Step 5/6: Uploading SSH key to platform")
-		publicKeyStr := string(kp.PublicKey)
-		_, err := authClient.CreateSSHKey(publicKeyStr, keyName)
-		if err != nil {
-			// Check if it's a 409 Conflict (key already exists)
-			if strings.Contains(err.Error(), "409") {
-				// Key exists with different fingerprint, continue
-				logging.Verbose("SSH key with same name but different fingerprint exists, continuing with login")
-				fmt.Printf("⚠ Warning: SSH key with same name but different fingerprint exists. Continuing with login.\n")
+	// Step 5: Handle SSH key registration
+	if existingKey != nil {
+		if existingKey.Fingerprint == kp.Fingerprint {
+			logging.Verbose("Step 5/6: SSH key with matching name and fingerprint already registered, skipping upload")
+		} else {
+			logging.Verbose("Step 5/6: SSH key with matching name but different fingerprint exists, deleting old key")
+			err := authClient.DeleteSSHKey(existingKey.ID)
+			if err != nil {
+				logging.Verbose("Warning: Could not delete existing SSH key: %v", err)
+				fmt.Printf("⚠ Warning: Could not delete existing SSH key: %v\n", err)
 			} else {
-				// For other errors, warn but continue
-				logging.Verbose("Warning: Could not upload SSH key: %v", err)
-				fmt.Printf("⚠ Warning: Could not upload SSH key: %v\n", err)
+				logging.Verbose("Existing SSH key deleted successfully")
+				// Now upload the new key
+				logging.Verbose("Uploading new SSH key")
+				publicKeyStr := string(kp.PublicKey)
+				_, err := authClient.CreateSSHKey(publicKeyStr, lc.KeyName)
+				if err != nil {
+					logging.Verbose("Warning: Could not upload SSH key: %v", err)
+					fmt.Printf("⚠ Warning: Could not upload SSH key: %v\n", err)
+				} else {
+					logging.Verbose("SSH key uploaded successfully")
+				}
 			}
+		}
+	} else {
+		logging.Verbose("Step 5/6: SSH key not found, uploading new key")
+		publicKeyStr := string(kp.PublicKey)
+		_, err := authClient.CreateSSHKey(publicKeyStr, lc.KeyName)
+		if err != nil {
+			logging.Verbose("Warning: Could not upload SSH key: %v", err)
+			fmt.Printf("⚠ Warning: Could not upload SSH key: %v\n", err)
 		} else {
 			logging.Verbose("SSH key uploaded successfully")
 		}
-	} else {
-		logging.Verbose("Step 5/6: Skipping SSH key upload (key already registered)")
 	}
 
 	// Step 6: Save configuration to disk
