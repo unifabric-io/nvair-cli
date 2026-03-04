@@ -1,0 +1,127 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-notes:
+    name: Generate Release Notes
+    uses: ./.github/workflows/release-notes-generate.yml
+    secrets:
+      COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+    with:
+      tag: ${{ github.ref_name }}
+      copilot_model: ${{ vars.COPILOT_MODEL || 'gpt-5.1-codex-max' }}
+
+  build-binaries:
+    name: Build ${{ matrix.goos }} ${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            archive: tar.gz
+            ext: ""
+          - goos: linux
+            goarch: arm64
+            archive: tar.gz
+            ext: ""
+          - goos: darwin
+            goarch: amd64
+            archive: tar.gz
+            ext: ""
+          - goos: darwin
+            goarch: arm64
+            archive: tar.gz
+            ext: ""
+          - goos: windows
+            goarch: amd64
+            archive: zip
+            ext: ".exe"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.25.6'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          BINARY_NAME="nvcli${{ matrix.ext }}"
+          ARCHIVE_NAME="nvcli_${TAG_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          OUTPUT_DIR="dist/build/${{ matrix.goos }}-${{ matrix.goarch }}"
+
+          mkdir -p "$OUTPUT_DIR"
+
+          go build -o "$OUTPUT_DIR/$BINARY_NAME" ./cmd/nvcli
+
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            zip "dist/${ARCHIVE_NAME}.zip" -j "$OUTPUT_DIR/$BINARY_NAME"
+          else
+            tar -czf "dist/${ARCHIVE_NAME}.tar.gz" -C "$OUTPUT_DIR" "$BINARY_NAME"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvcli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/nvcli_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.*
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs:
+      - build-binaries
+      - release-notes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          shopt -s nullglob
+          files=(nvcli_*.tar.gz nvcli_*.zip)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No release archives found to checksum" >&2
+            exit 1
+          fi
+          sha256sum "${files[@]}" > sha256sums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          append_body: false
+          generate_release_notes: false
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body_path: dist/release-notes.md
+          files: |
+            dist/nvcli_*.tar.gz
+            dist/nvcli_*.zip
+            dist/sha256sums.txt
+            dist/release-notes.md
