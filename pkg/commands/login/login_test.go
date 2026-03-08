@@ -1,4 +1,4 @@
-package commands
+package login
 
 import (
 	"encoding/json"
@@ -6,11 +6,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
+
+	"github.com/unifabric-io/nvair-cli/pkg/testutil"
 )
 
-// TestLoginCommand_FirstTimeLogin tests a complete first-time login flow.
 func TestLoginCommand_FirstTimeLogin(t *testing.T) {
-	// Create temporary home directory
 	tmpDir, err := os.MkdirTemp("", "nvair-login-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -21,36 +22,36 @@ func TestLoginCommand_FirstTimeLogin(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", originalHome)
 
-	// Create a mock API server
+	loginToken := testutil.MakeTestJWT(time.Now().Add(24 * time.Hour))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/login/":
 			resp := map[string]interface{}{
 				"result":  "OK",
 				"message": "Successfully logged in.",
-				"token":   "test-bearer-token",
+				"token":   loginToken,
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(resp)
 
-		case "/v1/sshkey":
-			if r.Method == "GET" {
-				// No keys found
+		case "/v1/sshkey", "/v1/sshkey/":
+			switch r.Method {
+			case http.MethodGet:
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("[]"))
-			} else if r.Method == "POST" {
-				// Successfully created key - API returns array
-				resp := []map[string]string{
-					{
-						"id":          "new-key-id",
-						"fingerprint": "test-fingerprint==",
-					},
+			case http.MethodPost:
+				resp := map[string]string{
+					"id":          "new-key-id",
+					"name":        "nvair-cli",
+					"fingerprint": "test-fingerprint==",
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusCreated)
 				json.NewEncoder(w).Encode(resp)
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
 
 		default:
@@ -59,57 +60,46 @@ func TestLoginCommand_FirstTimeLogin(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Create and execute login command
-	cmd := NewLoginCommand()
+	cmd := NewCommand()
 	cmd.Username = "test@example.com"
 	cmd.APIToken = "test-api-token"
 	cmd.APIEndpoint = server.URL
 
-	err = cmd.Execute()
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
-
-	// TODO: Verify that config was saved correctly
 }
 
-// TestLoginCommand_MissingUsername tests validation of missing username.
 func TestLoginCommand_MissingUsername(t *testing.T) {
-	cmd := NewLoginCommand()
+	cmd := NewCommand()
 	cmd.Username = ""
 	cmd.APIToken = "test-token"
 
-	err := cmd.Execute()
-	if err == nil {
+	if err := cmd.Execute(); err == nil {
 		t.Error("Expected error for missing username, got nil")
 	}
 }
 
-// TestLoginCommand_MissingToken tests validation of missing API token.
 func TestLoginCommand_MissingToken(t *testing.T) {
-	cmd := NewLoginCommand()
+	cmd := NewCommand()
 	cmd.Username = "test@example.com"
 	cmd.APIToken = ""
 
-	err := cmd.Execute()
-	if err == nil {
+	if err := cmd.Execute(); err == nil {
 		t.Error("Expected error for missing token, got nil")
 	}
 }
 
-// TestLoginCommand_InvalidEmail tests validation of invalid email format.
 func TestLoginCommand_InvalidEmail(t *testing.T) {
-	cmd := NewLoginCommand()
+	cmd := NewCommand()
 	cmd.Username = "not-an-email"
 	cmd.APIToken = "test-token"
 
-	err := cmd.Execute()
-	if err == nil {
+	if err := cmd.Execute(); err == nil {
 		t.Error("Expected error for invalid email, got nil")
 	}
 }
 
-// TestLoginCommand_AuthenticationFailure tests handling of 401 response.
 func TestLoginCommand_AuthenticationFailure(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "nvair-login-test")
 	if err != nil {
@@ -127,18 +117,16 @@ func TestLoginCommand_AuthenticationFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cmd := NewLoginCommand()
+	cmd := NewCommand()
 	cmd.Username = "test@example.com"
 	cmd.APIToken = "wrong-token"
 	cmd.APIEndpoint = server.URL
 
-	err = cmd.Execute()
-	if err == nil {
+	if err := cmd.Execute(); err == nil {
 		t.Error("Expected error for authentication failure, got nil")
 	}
 }
 
-// TestIsValidEmail tests email validation.
 func TestIsValidEmail(t *testing.T) {
 	tests := []struct {
 		email string
@@ -154,14 +142,12 @@ func TestIsValidEmail(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := isValidEmail(tt.email)
-		if result != tt.valid {
+		if result := isValidEmail(tt.email); result != tt.valid {
 			t.Errorf("isValidEmail(%q) = %v, want %v", tt.email, result, tt.valid)
 		}
 	}
 }
 
-// TestLoginCommand_TokenExpiry tests that token expiry is set correctly.
 func TestLoginCommand_TokenExpiry(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "nvair-login-test")
 	if err != nil {
@@ -173,36 +159,48 @@ func TestLoginCommand_TokenExpiry(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", originalHome)
 
+	loginToken := testutil.MakeTestJWT(time.Now().Add(24 * time.Hour))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/login/":
 			resp := map[string]interface{}{
 				"result": "OK",
-				"token":  "test-token",
+				"token":  loginToken,
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(resp)
-		case "/v1/sshkey":
-			if r.Method == "GET" {
+		case "/v1/sshkey", "/v1/sshkey/":
+			switch r.Method {
+			case http.MethodGet:
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("[]"))
+			case http.MethodPost:
+				resp := map[string]string{
+					"id":          "new-key-id",
+					"name":        "nvair-cli",
+					"fingerprint": "test-fingerprint==",
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				json.NewEncoder(w).Encode(resp)
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
+
+		default:
+			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 
-	cmd := NewLoginCommand()
+	cmd := NewCommand()
 	cmd.Username = "test@example.com"
-	cmd.APIToken = "test-token"
+	cmd.APIToken = "test-api-token"
 	cmd.APIEndpoint = server.URL
 
-	err = cmd.Execute()
-	if err != nil {
-		t.Fatalf("Login failed: %v", err)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Login should succeed: %v", err)
 	}
-
-	// Verify config was saved with expiry
-	// Note: This test would need to read the saved config file to fully validate
 }

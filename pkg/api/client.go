@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
+	"github.com/unifabric-io/nvair-cli/pkg/topology"
+	"moul.io/http2curl"
 )
 
 // Client represents an HTTP API client with bearer token authentication and retry logic.
@@ -18,6 +21,37 @@ type Client struct {
 	bearerToken string
 	httpClient  *http.Client
 	maxRetries  int
+}
+
+// TokenExpireTime parses a JWT token and extracts the expiration time from the exp claim.
+// Returns the expiration time or an error if the token is invalid.
+func TokenExpireTime(token string) (time.Time, error) {
+	if token == "" {
+		return time.Time{}, fmt.Errorf("token is empty")
+	}
+
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return time.Time{}, fmt.Errorf("invalid token format")
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to decode token payload: %w", err)
+	}
+
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return time.Time{}, fmt.Errorf("failed to unmarshal token claims: %w", err)
+	}
+
+	if claims.Exp <= 0 {
+		return time.Time{}, fmt.Errorf("invalid exp claim: %d", claims.Exp)
+	}
+
+	return time.Unix(claims.Exp, 0), nil
 }
 
 // NewClient creates a new API client.
@@ -79,8 +113,12 @@ func (c *Client) AuthLogin(username, apiToken string) (string, time.Time, error)
 		return "", time.Time{}, fmt.Errorf("failed to decode auth response: %w", err)
 	}
 
-	// Token expires in 24 hours (based on research.md)
-	expiresAt := time.Now().Add(24 * time.Hour)
+	// Parse the JWT token to extract the actual expiration time
+	expiresAt, err := TokenExpireTime(authResp.Token)
+	if err != nil {
+		logging.Verbose("AuthLogin: Failed to parse token expiration: %v", err)
+		return "", time.Time{}, fmt.Errorf("failed to parse bearer token: %w", err)
+	}
 	logging.Verbose("AuthLogin: Successfully obtained bearer token, expires at: %s", expiresAt)
 
 	return authResp.Token, expiresAt, nil
@@ -196,6 +234,103 @@ func (c *Client) CreateSSHKey(publicKey, name string) (*CreateSSHKeyResponse, er
 	return &keyResp, nil
 }
 
+// DeleteSSHKey deletes an SSH key by its ID.
+// Returns an error if the deletion fails.
+func (c *Client) DeleteSSHKey(keyID string) error {
+	logging.Verbose("DeleteSSHKey: Starting SSH key deletion for key ID: %s", keyID)
+
+	logging.Verbose("DeleteSSHKey: Sending DELETE request to /v1/sshkey/%s", keyID)
+	resp, err := c.doRequest("DELETE", fmt.Sprintf("/v1/sshkey/%s/", keyID), nil, true)
+	if err != nil {
+		logging.Verbose("DeleteSSHKey: Request failed with error: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Check for errors
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		logging.Verbose("DeleteSSHKey: Received status code %d with body: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("delete ssh key failed: status %d: %s", resp.StatusCode, string(body))
+	}
+
+	logging.Verbose("DeleteSSHKey: Successfully deleted SSH key with ID: %s", keyID)
+	return nil
+}
+
+// EnableSSHResponse represents the response body for POST /v1/service/
+type EnableSSHResponse struct {
+	URL               string `json:"url"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Simulation        string `json:"simulation"`
+	Interface         string `json:"interface"`
+	DestPort          int    `json:"dest_port"`
+	SrcPort           int    `json:"src_port"`
+	Link              string `json:"link"`
+	ServiceType       string `json:"service_type"`
+	NodeName          string `json:"node_name"`
+	InterfaceName     string `json:"interface_name"`
+	Host              string `json:"host"`
+	OSDefaultUsername string `json:"os_default_username"`
+}
+
+// CreateService creates a service for a simulation interface.
+// serviceName: the name of the service (e.g., "oob-mgmt-server-ssh", "k8s-api-server")
+// destPort: the destination port on the target interface (e.g., 22 for SSH, 6443 for Kubernetes API)
+// serviceType: the type of service (e.g., "ssh", "kubernetes")
+// Returns the service details including the host and port information.
+func (c *Client) CreateService(simulationID, interfaceID, serviceName string, destPort int, serviceType string) (*EnableSSHResponse, error) {
+	logging.Verbose("CreateService: Creating %s service for simulation: %s, interface: %s, destPort: %d", serviceType, simulationID, interfaceID, destPort)
+
+	reqBody := map[string]interface{}{
+		"name":         serviceName,
+		"simulation":   simulationID,
+		"interface":    interfaceID,
+		"dest_port":    destPort,
+		"service_type": serviceType,
+	}
+
+	logging.Verbose("CreateService: Sending POST request to /v1/service/")
+	resp, err := c.doRequest("POST", "/v1/service/", &reqBody, true)
+	if err != nil {
+		logging.Verbose("CreateService: Request failed with error: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("CreateService: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("create %s service failed: status %d: %s", serviceType, resp.StatusCode, string(bodyBytes))
+	}
+
+	// Decode response
+	var svcResp EnableSSHResponse
+	if err := json.Unmarshal(bodyBytes, &svcResp); err != nil {
+		logging.Verbose("CreateService: Failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode create %s service response: %w", serviceType, err)
+	}
+
+	logging.Verbose("CreateService: Successfully created %s service with ID: %s, SrcPort: %d, Host: %s", serviceType, svcResp.ID, svcResp.SrcPort, svcResp.Host)
+	return &svcResp, nil
+}
+
+// CreateSSHService creates an SSH service for a simulation interface.
+// Returns the service details including the host and port information.
+func (c *Client) CreateSSHService(simulationID, interfaceID string) (*EnableSSHResponse, error) {
+	return c.CreateService(simulationID, interfaceID, "oob-mgmt-server-ssh", 22, "ssh")
+}
+
+// CreateKubernetesAPIService creates a Kubernetes API service for a simulation interface.
+// Returns the service details including the host and port information.
+func (c *Client) CreateKubernetesAPIService(simulationID, interfaceID string) (*EnableSSHResponse, error) {
+	return c.CreateService(simulationID, interfaceID, "k8s-api-server", 6443, "other")
+}
+
 // doRequest performs an HTTP request with retry logic and bearer token injection.
 // useAuth determines whether to include the bearer token in the Authorization header.
 func (c *Client) doRequest(method, path string, body interface{}, useAuth bool) (*http.Response, error) {
@@ -208,7 +343,7 @@ func (c *Client) doRequest(method, path string, body interface{}, useAuth bool) 
 		var reqBodyReader io.Reader
 		if body != nil {
 			bodyBytes, _ := json.Marshal(body)
-			logging.Verbose("doRequest: Request body: %s", string(bodyBytes))
+			// logging.Verbose("doRequest: Request body: %s", string(bodyBytes))
 			reqBodyReader = bytes.NewReader(bodyBytes)
 		}
 
@@ -229,6 +364,11 @@ func (c *Client) doRequest(method, path string, body interface{}, useAuth bool) 
 				truncatedToken = truncatedToken[:20] + "..."
 			}
 			logging.Verbose("doRequest: Bearer token header set with token: %s", truncatedToken)
+		}
+
+		// Print curl command for debugging
+		if curl, err := http2curl.GetCurlCommand(req); err == nil {
+			logging.Verbose("doRequest: %s", curl.String())
 		}
 
 		// Perform the request
@@ -272,4 +412,425 @@ func (c *Client) doRequest(method, path string, body interface{}, useAuth bool) 
 	}
 
 	return nil, lastErr
+}
+
+// CreateSimulationRequest represents the request body for POST /v1/simulations
+type CreateSimulationRequest struct {
+	Topology interface{} `json:"topology"`
+}
+
+// CreateSimulationResponse represents the response body for POST /v2/simulations/import/
+type CreateSimulationResponse struct {
+	ID               string      `json:"id"`
+	Title            string      `json:"title"`
+	Organization     interface{} `json:"organization"`
+	OrganizationName interface{} `json:"organization_name"`
+}
+
+// CreateSimulation creates a new simulation from a topology
+func (c *Client) CreateSimulation(topo *topology.RawTopology) (*CreateSimulationResponse, error) {
+	logging.Verbose("CreateSimulation: Starting simulation creation with topology: %s", topo.Title)
+
+	reqBody := topo
+
+	logging.Verbose("CreateSimulation: Sending POST request to /api/v2/simulations/import/")
+	resp, err := c.doRequest("POST", "/v2/simulations/import/", &reqBody, true)
+	if err != nil {
+		logging.Verbose("CreateSimulation: Request failed with error: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("CreateSimulation: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("create simulation failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Decode response
+	var simResp CreateSimulationResponse
+	if err := json.Unmarshal(bodyBytes, &simResp); err != nil {
+		logging.Verbose("CreateSimulation: Failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode create simulation response: %w", err)
+	}
+
+	logging.Verbose("CreateSimulation: Successfully created simulation with ID: %s, Title: %s", simResp.ID, simResp.Title)
+	return &simResp, nil
+}
+
+// ControlSimulationResponse represents the response body for POST /v1/simulation/{id}/control/
+type ControlSimulationResponse struct {
+	Result string   `json:"result"`
+	Jobs   []string `json:"jobs"`
+}
+
+// ControlSimulation sets the control state of a simulation (e.g., "load", "play", "stop")
+func (c *Client) ControlSimulation(simulationID, state string) (*ControlSimulationResponse, error) {
+	logging.Verbose("ControlSimulation: Setting simulation %s to state: %s", simulationID, state)
+
+	payload, err := json.Marshal(map[string]string{"action": state})
+	if err != nil {
+		logging.Verbose("ControlSimulation: Failed to marshal request body: %v", err)
+		return nil, fmt.Errorf("failed to marshal control request: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("/v1/simulation/%s/control/", simulationID)
+	logging.Verbose("ControlSimulation: Sending POST request to %s with payload: %s", endpoint, string(payload))
+
+	resp, err := c.doRequest("POST", endpoint, map[string]string{"action": state}, true)
+	if err != nil {
+		logging.Verbose("ControlSimulation: Request failed with error: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("ControlSimulation: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("control simulation failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Decode response
+	var ctrlResp ControlSimulationResponse
+	if err := json.Unmarshal(bodyBytes, &ctrlResp); err != nil {
+		logging.Verbose("ControlSimulation: Failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode control simulation response: %w", err)
+	}
+
+	logging.Verbose("ControlSimulation: Successfully set simulation %s to state %s, result: %s", simulationID, state, ctrlResp.Result)
+	return &ctrlResp, nil
+}
+
+// SimulationInfo represents a single simulation in the list response
+type SimulationInfo struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	State string `json:"state"`
+}
+
+// ListSimulationsResponse represents the response body for GET /v2/simulations
+type ListSimulationsResponse struct {
+	Count    int              `json:"count"`
+	Next     interface{}      `json:"next"`
+	Previous interface{}      `json:"previous"`
+	Results  []SimulationInfo `json:"results"`
+}
+
+// ImageInfo represents a single image returned by GET /v2/images.
+type ImageInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ListImagesResponse represents the response body for GET /v2/images.
+type ListImagesResponse struct {
+	Count    int         `json:"count"`
+	Next     interface{} `json:"next"`
+	Previous interface{} `json:"previous"`
+	Results  []ImageInfo `json:"results"`
+}
+
+// GetImages retrieves images from the authenticated user's catalog.
+func (c *Client) GetImages() ([]ImageInfo, error) {
+	logging.Verbose("GetImages: Sending GET request to /v2/images?limit=1000")
+	resp, err := c.doRequest("GET", "/v2/images?limit=1000", nil, true)
+	if err != nil {
+		logging.Verbose("GetImages: Request failed with error: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("GetImages: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("get images failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var listResp ListImagesResponse
+	if err := json.Unmarshal(bodyBytes, &listResp); err != nil {
+		logging.Verbose("GetImages: Failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode images list response: %w", err)
+	}
+
+	logging.Verbose("GetImages: Successfully retrieved %d images", len(listResp.Results))
+	return listResp.Results, nil
+}
+
+// GetSimulations retrieves all simulations for the authenticated user
+func (c *Client) GetSimulations() ([]SimulationInfo, error) {
+	logging.Verbose("GetSimulations: Sending GET request to /v2/simulations")
+	resp, err := c.doRequest("GET", "/v2/simulations", nil, true)
+	if err != nil {
+		logging.Verbose("GetSimulations: Request failed with error: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("GetSimulations: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("get simulations failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Decode response
+	var listResp ListSimulationsResponse
+	if err := json.Unmarshal(bodyBytes, &listResp); err != nil {
+		logging.Verbose("GetSimulations: Failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode simulations list response: %w", err)
+	}
+
+	logging.Verbose("GetSimulations: Successfully retrieved %d simulations", len(listResp.Results))
+	return listResp.Results, nil
+}
+
+// DeleteSimulation deletes a simulation by name
+// It first retrieves all simulations, finds the one matching the given name (title),
+// and then deletes it using its ID.
+func (c *Client) DeleteSimulation(name string) error {
+	logging.Verbose("DeleteSimulation: Starting deletion of simulation: %s", name)
+
+	// Get all simulations
+	simulations, err := c.GetSimulations()
+	if err != nil {
+		logging.Verbose("DeleteSimulation: Failed to get simulations list: %v", err)
+		return fmt.Errorf("failed to list simulations: %w", err)
+	}
+
+	// Find the simulation with matching title
+	var simulationID string
+	for _, sim := range simulations {
+		if sim.Title == name {
+			simulationID = sim.ID
+			break
+		}
+	}
+
+	if simulationID == "" {
+		logging.Verbose("DeleteSimulation: Simulation with title '%s' not found", name)
+		return fmt.Errorf("simulation '%s' not found", name)
+	}
+
+	// Delete the simulation using its ID
+	logging.Verbose("DeleteSimulation: Found simulation ID: %s, deleting", simulationID)
+
+	if err := c.DeleteSimulationByID(simulationID); err != nil {
+		return err
+	}
+
+	logging.Verbose("DeleteSimulation: Successfully deleted simulation: %s (ID: %s)", name, simulationID)
+	return nil
+}
+
+// DeleteSimulationByID deletes a simulation by its ID.
+// Returns an error if the deletion fails.
+func (c *Client) DeleteSimulationByID(simulationID string) error {
+	logging.Verbose("DeleteSimulationByID: Starting deletion of simulation ID: %s", simulationID)
+
+	endpoint := fmt.Sprintf("/v2/simulations/%s/", simulationID)
+	logging.Verbose("DeleteSimulationByID: Sending DELETE request to %s", endpoint)
+
+	resp, err := c.doRequest("DELETE", endpoint, nil, true)
+	if err != nil {
+		logging.Verbose("DeleteSimulationByID: Request failed with error: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("DeleteSimulationByID: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return fmt.Errorf("delete simulation failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	logging.Verbose("DeleteSimulationByID: Successfully deleted simulation ID: %s", simulationID)
+	return nil
+}
+
+// DeleteService deletes a service by name
+func (c *Client) DeleteService(name string) error {
+	logging.Verbose("DeleteService: Starting deletion of service: %s", name)
+
+	endpoint := fmt.Sprintf("/v1/services/%s", name)
+	logging.Verbose("DeleteService: Sending DELETE request to %s", endpoint)
+
+	resp, err := c.doRequest("DELETE", endpoint, nil, true)
+	if err != nil {
+		logging.Verbose("DeleteService: Request failed with error: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	// Handle 404 specifically
+	if resp.StatusCode == http.StatusNotFound {
+		logging.Verbose("DeleteService: Service not found (404)")
+		return fmt.Errorf("service '%s' not found", name)
+	}
+
+	// Check for other errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("DeleteService: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return fmt.Errorf("delete service failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	logging.Verbose("DeleteService: Successfully deleted service: %s", name)
+	return nil
+}
+
+// Job represents a job status from the API
+type Job struct {
+	Category    string `json:"category"`
+	Created     string `json:"created"`
+	ID          string `json:"id"`
+	LastUpdated string `json:"last_updated"`
+	Simulation  string `json:"simulation"`
+	State       string `json:"state"`
+}
+
+// GetJob retrieves the status of a specific job
+func (c *Client) GetJob(jobID string) (*Job, error) {
+	logging.Verbose("GetJob: Fetching job status for job ID: %s", jobID)
+
+	endpoint := fmt.Sprintf("/v2/jobs/%s", jobID)
+	resp, err := c.doRequest("GET", endpoint, nil, true)
+	if err != nil {
+		logging.Verbose("GetJob: Request failed with error: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("GetJob: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("get job failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Decode response
+	var job Job
+	if err := json.Unmarshal(bodyBytes, &job); err != nil {
+		logging.Verbose("GetJob: Failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode job response: %w", err)
+	}
+
+	logging.Verbose("GetJob: Successfully retrieved job %s, state: %s", jobID, job.State)
+	return &job, nil
+}
+
+// Node represents a simulation node
+type Node struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	State    string `json:"state"`
+	Metadata string `json:"metadata"`
+	OS       string `json:"os"`
+	OSName   string `json:"-"`
+}
+
+// nodeListResponse represents the response body for GET /v2/simulations/nodes/
+type nodeListResponse struct {
+	Results []Node `json:"results"`
+}
+
+// GetNodes retrieves all nodes for a simulation
+func (c *Client) GetNodes(simulationID string) ([]Node, error) {
+	logging.Verbose("GetNodes: Fetching nodes for simulation")
+
+	path := fmt.Sprintf("/v2/simulations/nodes/?simulation=%s&ordering=os", simulationID)
+	resp, err := c.doRequest("GET", path, nil, true)
+	if err != nil {
+		logging.Verbose("GetNodes: Request failed with error: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("GetNodes: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("get nodes failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Decode response
+	var listResp nodeListResponse
+	if err := json.Unmarshal(bodyBytes, &listResp); err != nil {
+		logging.Verbose("GetNodes: Failed to decode response: %v, body: %s", err, string(bodyBytes))
+		return nil, fmt.Errorf("failed to decode nodes response: %w", err)
+	}
+
+	logging.Verbose("GetNodes: Successfully retrieved %d nodes", len(listResp.Results))
+	return listResp.Results, nil
+}
+
+// Interface represents a simulation node interface
+type Interface struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	InterfaceType string `json:"interface_type"`
+	MacAddress    string `json:"mac_address"`
+	LinkUp        bool   `json:"link_up"`
+	InternalIPv4  string `json:"internal_ipv4"`
+	FullIPv6      string `json:"full_ipv6"`
+	PrefixIPv6    string `json:"prefix_ipv6"`
+	PortNumber    int    `json:"port_number"`
+	Node          string `json:"node"`
+	Simulation    string `json:"simulation"`
+	Outbound      bool   `json:"outbound"`
+	Link          string `json:"link"`
+}
+
+// interfaceListResponse represents the response body for GET /v2/simulations/nodes/interfaces
+type interfaceListResponse struct {
+	Results []Interface `json:"results"`
+}
+
+// GetNodeInterfaces retrieves interfaces for a specific node in a simulation
+func (c *Client) GetNodeInterfaces(simulationID, nodeID string) ([]Interface, error) {
+	logging.Verbose("GetNodeInterfaces: Fetching interfaces for node %s in simulation %s", nodeID, simulationID)
+
+	endpoint := fmt.Sprintf("/v2/simulations/nodes/interfaces?simulation=%s&node=%s", simulationID, nodeID)
+	resp, err := c.doRequest("GET", endpoint, nil, true)
+	if err != nil {
+		logging.Verbose("GetNodeInterfaces: Request failed with error: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	// Check for errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("GetNodeInterfaces: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("get node interfaces failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Decode response
+	var listResp interfaceListResponse
+	if err := json.Unmarshal(bodyBytes, &listResp); err != nil {
+		logging.Verbose("GetNodeInterfaces: Failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode interfaces response: %w", err)
+	}
+
+	logging.Verbose("GetNodeInterfaces: Successfully retrieved %d interfaces for node %s", len(listResp.Results), nodeID)
+	return listResp.Results, nil
 }

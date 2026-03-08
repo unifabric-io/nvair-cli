@@ -40,7 +40,7 @@ If you are using a different editor or AI assistant, you can download the requir
 
 For more read the [spec-kit](https://github.com/github/spec-kit) documentation to set it up.
 
-## Quickly develop a new feature
+## Develop a new feature
 
 This guide explains how to quickly develop a new feature in this project using the spec-kit toolchain.
 
@@ -95,6 +95,27 @@ This will auto-generate a PR, sync checklists, and track progress.
 
 See the README or speckit help for more advanced usage.
 
+## Quick Reference
+
+- Build
+  ```bash
+  make build
+  ```
+
+- Unit Tests
+  ```bash
+  make test-unit
+  ```
+
+- Coverage Tests
+  ```bash
+  make test-coverage
+  ```
+
+- E2E Tests
+  ```bash
+  NV_AIR_USER=changeme@xx.com NV_AIR_TOKEN=changeme make test-e2e
+  ```
 
 ## PR Workflow Summary
 
@@ -107,15 +128,3 @@ See the README or speckit help for more advanced usage.
 
 - **One-time setup**:
   - Set `NV_AIR_USER` and `NV_AIR_TOKEN` in GitHub Actions secrets
-
-
-## Test Commands Quick Reference
-
-- **Unit Tests**  
-  `make test-unit`
-
-- **Coverage Tests**  
-  `make test-coverage` (generates `coverage.html`)
-
-- **E2E Tests**  
-  `NV_AIR_USER=changeme@xx.com NV_AIR_TOKEN=changeme make test-e2e`
