@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"strings"
 	"time"
 
@@ -27,17 +26,6 @@ type SwitchPasswordResetConfig struct {
 	NewPassword string
 
 	Timeout time.Duration
-}
-
-// SwitchCopyConfig holds the configuration for copying a file to a switch via bastion
-type SwitchCopyConfig struct {
-	BastionAddr    string
-	BastionUser    string
-	BastionKey     string
-	SwitchAddr     string
-	SwitchUser     string
-	SwitchPassword string
-	Timeout        time.Duration
 }
 
 // ChangeSwitchPasswordViaBastion changes the switch password by SSH'ing through bastion
@@ -123,118 +111,6 @@ func ChangeSwitchPasswordViaBastion(cfg SwitchPasswordResetConfig) error {
 			if !shouldRetry(err) {
 				return err
 			}
-			continue
-		}
-		return nil
-	}
-
-	return lastErr
-}
-
-// CopySwitchConfigViaBastion copies a local file to the switch via bastion using scp protocol
-func CopySwitchConfigViaBastion(cfg SwitchCopyConfig, localPath, remotePath string) error {
-	copyOnce := func() error {
-		signer, err := loadPrivateKeySigner(cfg.BastionKey)
-		if err != nil {
-			return fmt.Errorf("load private key failed: %w", err)
-		}
-
-		bastionCfg := &ssh.ClientConfig{
-			User:            cfg.BastionUser,
-			Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			Timeout:         cfg.Timeout,
-		}
-
-		bastionClient, err := ssh.Dial("tcp", cfg.BastionAddr, bastionCfg)
-		if err != nil {
-			return fmt.Errorf("ssh dial failed: %w", err)
-		}
-		defer bastionClient.Close()
-
-		targetClient, err := dialSwitchThroughBastion(
-			bastionClient,
-			cfg.SwitchAddr,
-			cfg.SwitchUser,
-			cfg.SwitchPassword,
-			cfg.Timeout,
-		)
-		if err != nil {
-			return err
-		}
-		defer targetClient.Close()
-
-		fileInfo, err := os.Stat(localPath)
-		if err != nil {
-			return fmt.Errorf("stat local file failed: %w", err)
-		}
-
-		f, err := os.Open(localPath)
-		if err != nil {
-			return fmt.Errorf("open local file failed: %w", err)
-		}
-		defer f.Close()
-
-		session, err := targetClient.NewSession()
-		if err != nil {
-			return fmt.Errorf("new switch session failed: %w", err)
-		}
-		defer session.Close()
-
-		stdin, err := session.StdinPipe()
-		if err != nil {
-			return fmt.Errorf("stdin pipe failed: %w", err)
-		}
-		stdout, err := session.StdoutPipe()
-		if err != nil {
-			return fmt.Errorf("stdout pipe failed: %w", err)
-		}
-
-		if err := session.Start(fmt.Sprintf("scp -t %s", remotePath)); err != nil {
-			return fmt.Errorf("start scp failed: %w", err)
-		}
-
-		if err := scpReadResponse(stdout); err != nil {
-			return fmt.Errorf("scp ack failed: %w", err)
-		}
-
-		header := fmt.Sprintf("C%04o %d %s\n", fileInfo.Mode()&0o777, fileInfo.Size(), "config.yml")
-		if _, err := io.WriteString(stdin, header); err != nil {
-			return fmt.Errorf("write scp header failed: %w", err)
-		}
-		if err := scpReadResponse(stdout); err != nil {
-			return fmt.Errorf("scp header ack failed: %w", err)
-		}
-
-		if _, err := io.Copy(stdin, f); err != nil {
-			return fmt.Errorf("copy file data failed: %w", err)
-		}
-		if _, err := stdin.Write([]byte{0}); err != nil {
-			return fmt.Errorf("write scp end failed: %w", err)
-		}
-		if err := scpReadResponse(stdout); err != nil {
-			return fmt.Errorf("scp data ack failed: %w", err)
-		}
-
-		if err := stdin.Close(); err != nil {
-			return fmt.Errorf("close stdin failed: %w", err)
-		}
-
-		return session.Wait()
-	}
-
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
-		}
-
-		if err := copyOnce(); err != nil {
-			lastErr = err
-			if !shouldRetry(err) {
-				return err
-			}
-			time.Sleep(time.Second)
 			continue
 		}
 		return nil

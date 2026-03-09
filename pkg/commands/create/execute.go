@@ -37,11 +37,11 @@ func (cc *Command) Execute() error {
 	}
 
 	if cc.DryRun {
-		logging.Info("Dry-run mode enabled, skipping API call")
+		logging.Info("✓ Topology loaded and validated (dry-run)")
 		return nil
+	} else {
+		logging.Info("✓ Topology loaded and validated")
 	}
-
-	logging.Info("✓ Topology validation passed. Ready to create.")
 
 	apiClient, _, err := ensureAuthenticatedClient(cc.APIEndpoint)
 	if err != nil {
@@ -173,5 +173,6 @@ func (cc *Command) Execute() error {
 		return err
 	}
 
+	logging.Info("✓ Create simulation successfully.")
 	return nil
 }

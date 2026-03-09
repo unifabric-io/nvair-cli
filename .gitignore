@@ -24,3 +24,11 @@ Thumbs.db
 
 # Go Test
 coverage.out
+
+# Go artifacts
+*.exe
+*.test
+*.out
+
+# Temp files
+*.tmp

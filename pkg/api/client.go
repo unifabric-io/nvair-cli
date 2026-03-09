@@ -6,13 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
 	"github.com/unifabric-io/nvair-cli/pkg/topology"
-	"moul.io/http2curl"
 )
 
 // Client represents an HTTP API client with bearer token authentication and retry logic.
@@ -366,11 +368,6 @@ func (c *Client) doRequest(method, path string, body interface{}, useAuth bool) 
 			logging.Verbose("doRequest: Bearer token header set with token: %s", truncatedToken)
 		}
 
-		// Print curl command for debugging
-		if curl, err := http2curl.GetCurlCommand(req); err == nil {
-			logging.Verbose("doRequest: %s", curl.String())
-		}
-
 		// Perform the request
 		startTime := time.Now()
 		resp, err := c.httpClient.Do(req)
@@ -538,8 +535,12 @@ type ListImagesResponse struct {
 
 // GetImages retrieves images from the authenticated user's catalog.
 func (c *Client) GetImages() ([]ImageInfo, error) {
-	logging.Verbose("GetImages: Sending GET request to /v2/images?limit=1000")
-	resp, err := c.doRequest("GET", "/v2/images?limit=1000", nil, true)
+	query := url.Values{}
+	query.Set("limit", strconv.FormatInt(math.MaxInt64, 10))
+
+	path := fmt.Sprintf("/v2/images?%s", query.Encode())
+	logging.Verbose("GetImages: Sending GET request to %s", path)
+	resp, err := c.doRequest("GET", path, nil, true)
 	if err != nil {
 		logging.Verbose("GetImages: Request failed with error: %v", err)
 		return nil, err
@@ -736,12 +737,13 @@ func (c *Client) GetJob(jobID string) (*Job, error) {
 
 // Node represents a simulation node
 type Node struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	State    string `json:"state"`
-	Metadata string `json:"metadata"`
-	OS       string `json:"os"`
-	OSName   string `json:"-"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	State      string `json:"state"`
+	Metadata   string `json:"metadata"`
+	OS         string `json:"os"`
+	OSName     string `json:"-"`
+	Simulation string `json:"simulation"`
 }
 
 // nodeListResponse represents the response body for GET /v2/simulations/nodes/
@@ -749,11 +751,29 @@ type nodeListResponse struct {
 	Results []Node `json:"results"`
 }
 
+type rawNode struct {
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	State      string      `json:"state"`
+	Metadata   interface{} `json:"metadata"`
+	OS         string      `json:"os"`
+	Simulation string      `json:"simulation"`
+}
+
+type rawNodeListResponse struct {
+	Results []rawNode `json:"results"`
+}
+
 // GetNodes retrieves all nodes for a simulation
 func (c *Client) GetNodes(simulationID string) ([]Node, error) {
 	logging.Verbose("GetNodes: Fetching nodes for simulation")
 
-	path := fmt.Sprintf("/v2/simulations/nodes/?simulation=%s&ordering=os", simulationID)
+	query := url.Values{}
+	query.Set("simulation", simulationID)
+	query.Set("ordering", "os")
+	query.Set("limit", strconv.FormatInt(math.MaxInt64, 10))
+
+	path := fmt.Sprintf("/v2/simulations/nodes/?%s", query.Encode())
 	resp, err := c.doRequest("GET", path, nil, true)
 	if err != nil {
 		logging.Verbose("GetNodes: Request failed with error: %v", err)
@@ -770,15 +790,81 @@ func (c *Client) GetNodes(simulationID string) ([]Node, error) {
 		return nil, fmt.Errorf("get nodes failed: status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	// Decode response
-	var listResp nodeListResponse
-	if err := json.Unmarshal(bodyBytes, &listResp); err != nil {
+	// Decode response with null-tolerant metadata handling.
+	var rawResp rawNodeListResponse
+	if err := json.Unmarshal(bodyBytes, &rawResp); err != nil {
 		logging.Verbose("GetNodes: Failed to decode response: %v, body: %s", err, string(bodyBytes))
 		return nil, fmt.Errorf("failed to decode nodes response: %w", err)
 	}
 
+	listResp := nodeListResponse{Results: make([]Node, 0, len(rawResp.Results))}
+	for _, n := range rawResp.Results {
+		metadata := ""
+		if s, ok := n.Metadata.(string); ok {
+			metadata = s
+		}
+		listResp.Results = append(listResp.Results, Node{
+			ID:         n.ID,
+			Name:       n.Name,
+			State:      n.State,
+			Metadata:   metadata,
+			OS:         n.OS,
+			Simulation: n.Simulation,
+		})
+	}
+
 	logging.Verbose("GetNodes: Successfully retrieved %d nodes", len(listResp.Results))
 	return listResp.Results, nil
+}
+
+// GetAllNodes retrieves all nodes across all simulations for the authenticated user.
+// Each returned Node has a Simulation field indicating which simulation it belongs to.
+func (c *Client) GetAllNodes() ([]Node, error) {
+	logging.Verbose("GetAllNodes: Fetching all nodes across all simulations")
+
+	query := url.Values{}
+	query.Set("ordering", "os")
+	query.Set("limit", strconv.FormatInt(math.MaxInt64, 10))
+
+	path := fmt.Sprintf("/v2/simulations/nodes/?%s", query.Encode())
+	resp, err := c.doRequest("GET", path, nil, true)
+	if err != nil {
+		logging.Verbose("GetAllNodes: Request failed with error: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("GetAllNodes: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("get all nodes failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var rawResp rawNodeListResponse
+	if err := json.Unmarshal(bodyBytes, &rawResp); err != nil {
+		logging.Verbose("GetAllNodes: Failed to decode response: %v, body: %s", err, string(bodyBytes))
+		return nil, fmt.Errorf("failed to decode all nodes response: %w", err)
+	}
+
+	nodes := make([]Node, 0, len(rawResp.Results))
+	for _, n := range rawResp.Results {
+		metadata := ""
+		if s, ok := n.Metadata.(string); ok {
+			metadata = s
+		}
+		nodes = append(nodes, Node{
+			ID:         n.ID,
+			Name:       n.Name,
+			State:      n.State,
+			Metadata:   metadata,
+			OS:         n.OS,
+			Simulation: n.Simulation,
+		})
+	}
+
+	logging.Verbose("GetAllNodes: Successfully retrieved %d nodes", len(nodes))
+	return nodes, nil
 }
 
 // Interface represents a simulation node interface

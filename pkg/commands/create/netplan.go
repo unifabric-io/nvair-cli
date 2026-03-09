@@ -86,7 +86,7 @@ func uploadNetplanConfigs(directory string, nodeNetplanTargets []api.Node, basti
 				return
 			}
 
-			tmpDst := "/tmp/dataplan"
+			tmpDst := constant.NetplanStagingRemotePath
 			logging.Info("Copying netplan for node %s (%s)...", n.Name, meta.MgmtIP)
 			if err := ssh.CopyFileViaBastion(ssh.BastionCopyConfig{
 				BastionAddr: bastionAddr,

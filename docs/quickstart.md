@@ -55,8 +55,10 @@ Commands:
       
   get                              Get resources (simulations, nodes, forwards)
     simulation                     List all simulations (alias: simulations)
+      -o, --output <json|yaml>     Structured output format (optional)
     node                           List nodes in a simulation (alias: nodes)
-      -s, --simulation <name>      Simulation name (optional, defaults to first simulation)
+      -s, --simulation <name>      Simulation name (required)
+      -o, --output <json|yaml>     Structured output format (optional)
     forward                        List port forward for a simulation (alias: forward)
       -s, --simulation <name>      Simulation name (optional, defaults to first simulation)
        
@@ -97,34 +99,136 @@ Global Options:
 
 ## Usage Examples
 
-```bash
-# Authenticate
-nvair login -u user@example.com -p <api-token>
-
-# Authenticate with verbose logging (for debugging)
-nvair --verbose login -u user@example.com -p <api-token>
+```log
+# login
+$ nvair login -u user@example.com -p <api-token>
+✓ Login successful. Credentials saved to /home/node/.config/nvair.unifabric.io/config.json
 
 # Validate topology config (dry-run)
-nvair create -d examples/simple/ --dry-run
+$ nvair create -d examples/simple/ --dry-run
+✓ Topology loaded and validated (dry-run)
 
 # Create simulation
-nvair create -d examples/simple/
+$ nvair create -d examples/simple/
+✓ Topology loaded and validated
+✓ Simulation created successfully. ID: cbfa2bbf-7714-478c-90a8-e27de9ce5a99, Name: simple
+✓ Simulation state set to 'load', result: success, jobs: [5207a0da-7487-4b46-9304-61e520d7590a f19e7fa0-f7c5-4c63-b8fe-f6e5df717fdd 5a6a52c7-b266-460a-b594-571d69fe2e40 d0c93a94-6a75-475d-8f6e-588e81fcfd6a b8dc5f99-4d7b-40b9-904a-2b497fcb88b2]
+Waiting for 5 jobs to complete ...
+✓ All jobs completed successfully.
+✓ Found outbound interface on oob-mgmt-server. Interface ID: 93164154-74b1-461a-a095-5f9f0684d3cc
+✓ SSH service created successfully. Host: worker02.air.nvidia.com, Port: 11084
+Waiting for SSH access to become ready...
+Resetting switches passwords via bastion...
+ping -c1 -W6 192.168.200.113 ...
+ping -c1 -W6 192.168.200.114 ...
+ping -c1 -W6 192.168.200.112 ...
+ping -c1 -W6 192.168.200.111 ...
+ping -c1 -W6 192.168.200.131 ...
+ping -c1 -W6 192.168.200.121 ...
+Switch switch-gpu-leaf3 reachable, updating password...
+Switch switch-gpu-leaf1 reachable, updating password...
+Switch switch-gpu-leaf4 reachable, updating password...
+Switch switch-storage-leaf1 reachable, updating password...
+Switch switch-gpu-spine1 reachable, updating password...
+Switch switch-gpu-leaf2 reachable, updating password...
+✓ Switch switch-gpu-leaf3 password updated.
+✓ Switch switch-gpu-leaf1 password updated.
+✓ Switch switch-gpu-leaf4 password updated.
+✓ Switch switch-storage-leaf1 password updated.
+✓ Switch switch-gpu-leaf2 password updated.
+✓ Switch switch-gpu-spine1 password updated.
+✓ Switch password reset completed.
+Copying switch configs via bastion
+Copying config for switch switch-gpu-leaf2 (192.168.200.112)...
+Copying config for switch switch-gpu-spine1 (192.168.200.121)...
+Copying config for switch switch-storage-leaf1 (192.168.200.131)...
+Copying config for switch switch-gpu-leaf1 (192.168.200.111)...
+Copying config for switch switch-gpu-leaf3 (192.168.200.113)...
+Copying config for switch switch-gpu-leaf4 (192.168.200.114)...
+✓ Config copied to switch switch-gpu-leaf4.
+✓ Config copied to switch switch-storage-leaf1.
+✓ Config copied to switch switch-gpu-spine1.
+✓ Config copied to switch switch-gpu-leaf2.
+✓ Config copied to switch switch-gpu-leaf1.
+✓ Config copied to switch switch-gpu-leaf3.
+✓ Switch configs copied.
+Applying switch configs on switches...
+✓ Config applied on switch switch-gpu-leaf3.
+✓ Config applied on switch switch-gpu-leaf4.
+✓ Config applied on switch switch-storage-leaf1.
+✓ Config applied on switch switch-gpu-leaf1.
+✓ Config applied on switch switch-gpu-spine1.
+✓ Config applied on switch switch-gpu-leaf2.
+✓ Switch configs applied.
+Uploading netplan configs on nodes via bastion...
+Copying netplan for node node-gpu-2 (192.168.200.7)...
+Copying netplan for node node-gpu-1 (192.168.200.6)...
+Copying netplan for node node-gpu-3 (192.168.200.8)...
+Copying netplan for node node-storage-1 (192.168.200.10)...
+Copying netplan for node node-gpu-4 (192.168.200.9)...
+✓ Netplan uploaded and applied on node node-gpu-4.
+✓ Netplan uploaded and applied on node node-storage-1.
+✓ Netplan uploaded and applied on node node-gpu-1.
+✓ Netplan uploaded and applied on node node-gpu-2.
+✓ Netplan uploaded and applied on node node-gpu-3.
+✓ Netplan configs uploaded and applied on nodes.
+✓ Create simulation successfully.
 
 # List simulations
-nvair get simulation
+$ nvair get simulation
+NAME    STATUS  ID                                    SWITCH  HOST
+simple  LOADED  d679effb-0d0a-406b-8ede-a746dc7053ec  6       5
 
-# Add a port forwarding rule to a simulation
+$ nvair get simulations -o json
+[
+  {
+    "id": "d679effb-0d0a-406b-8ede-a746dc7053ec",
+    "title": "simple",
+    "state": "LOADED",
+    "count": {
+      "switch": 6,
+      "host": 5
+    }
+  }
+]
+
+$ nvair get simulations -o yaml
+- id: d679effb-0d0a-406b-8ede-a746dc7053ec
+  title: simple
+  state: LOADED
+  count:
+    switch: 6
+    host: 5
+
+# List nodes in a simulation
+$ nvair get nodes --simulation simple
+NAME                  STATUS   MGMT_IP          IMAGE
+oob-mgmt-switch       RUNNING  192.168.200.2    oob-mgmt-switch
+switch-gpu-spine1     RUNNING  192.168.200.121  cumulus-vx-5.15.0
+switch-storage-leaf1  RUNNING  192.168.200.131  cumulus-vx-5.15.0
+switch-gpu-leaf4      RUNNING  192.168.200.114  cumulus-vx-5.15.0
+switch-gpu-leaf1      RUNNING  192.168.200.111  cumulus-vx-5.15.0
+switch-gpu-leaf2      RUNNING  192.168.200.112  cumulus-vx-5.15.0
+switch-gpu-leaf3      RUNNING  192.168.200.113  cumulus-vx-5.15.0
+node-gpu-3            RUNNING  192.168.200.8    generic/ubuntu2404
+node-gpu-2            RUNNING  192.168.200.7    generic/ubuntu2404
+node-gpu-1            RUNNING  192.168.200.6    generic/ubuntu2404
+node-storage-1        RUNNING  192.168.200.10   generic/ubuntu2404
+node-gpu-4            RUNNING  192.168.200.9    generic/ubuntu2404
+oob-mgmt-server       RUNNING  192.168.200.1    oob-mgmt-server
+
+# Add a port forwarding rule to a simulation (TODO)
 nvair add forward -p 6443
 nvair add forward -p 30032
 
-# List port forwarding rule in a simulation
+# List port forwarding rule in a simulation  (TODO)
 nvair get forward
 
-# Delete a port forwarding rule by service name
+# Delete a port forwarding rule by service name (TODO)
 nvair delete forward -p 6443
 
 # Execute command on a node
-nvair exec node-gpu-1 -s my-cluster -- hostname
+nvair exec node-gpu-1 -s my-cluster -- hostname (TODO)
 ```
 
 ## Verbose Mode
