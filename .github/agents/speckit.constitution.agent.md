@@ -18,9 +18,11 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 You are updating the project constitution at `.specify/memory/constitution.md`. This file is a TEMPLATE containing placeholder tokens in square brackets (e.g. `[PROJECT_NAME]`, `[PRINCIPLE_1_NAME]`). Your job is to (a) collect/derive concrete values, (b) fill the template precisely, and (c) propagate any amendments across dependent artifacts.
 
+**Note**: If `.specify/memory/constitution.md` does not exist yet, it should have been initialized from `.specify/templates/constitution-template.md` during project setup. If it's missing, copy the template first.
+
 Follow this execution flow:
 
-1. Load the existing constitution template at `.specify/memory/constitution.md`.
+1. Load the existing constitution at `.specify/memory/constitution.md`.
    - Identify every placeholder token of the form `[ALL_CAPS_IDENTIFIER]`.
    **IMPORTANT**: The user might require less or more principles than the ones used in the template. If a number is specified, respect that - follow the general template. You will update the doc accordingly.
 
@@ -52,7 +54,7 @@ Follow this execution flow:
    - List of modified principles (old title → new title if renamed)
    - Added sections
    - Removed sections
-   - Templates requiring updates (✅ updated / ❌ pending) with file paths
+   - Templates requiring updates (✅ updated / ⚠ pending) with file paths
    - Follow-up TODOs if any placeholders intentionally deferred.
 
 6. Validation before final output:

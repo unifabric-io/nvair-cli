@@ -120,15 +120,15 @@ func copySwitchConfigs(directory string, switchNodes []api.Node, bastionAddr, ke
 			}
 
 			logging.Info("Copying config for switch %s (%s)...", n.Name, meta.MgmtIP)
-			if err := ssh.CopySwitchConfigViaBastion(ssh.SwitchCopyConfig{
-				BastionAddr:    bastionAddr,
-				BastionUser:    constant.DefaultUbuntuUser,
-				BastionKey:     keyPath,
-				SwitchAddr:     meta.MgmtIP + ":22",
-				SwitchUser:     constant.DefaultCumulusUser,
-				SwitchPassword: constant.DefaultCumulusNewPassword,
-				Timeout:        120 * time.Second,
-			}, configPath, "/home/cumulus/config.yml"); err != nil {
+			if err := ssh.CopyFileViaBastion(ssh.BastionCopyConfig{
+				BastionAddr: bastionAddr,
+				BastionUser: constant.DefaultUbuntuUser,
+				BastionKey:  keyPath,
+				TargetAddr:  meta.MgmtIP + ":22",
+				TargetUser:  constant.DefaultCumulusUser,
+				TargetPass:  constant.DefaultCumulusNewPassword,
+				Timeout:     120 * time.Second,
+			}, configPath, constant.SwitchConfigRemotePath); err != nil {
 				logging.Verbose("Failed to copy config to switch %s: %v", n.Name, err)
 				errCh <- fmt.Errorf("copy config to switch %s failed: %w", n.Name, err)
 				return
@@ -170,7 +170,7 @@ func applySwitchConfigs(switchNodes []api.Node, bastionAddr, keyPath string) err
 				return
 			}
 
-			cmd := "nv config replace /home/cumulus/config.yml && nv config apply -y"
+			cmd := fmt.Sprintf("nv config replace %s && nv config apply -y", constant.SwitchConfigRemotePath)
 			res, err := bastion.ExecCommandViaBastion(bastion.BastionExecConfig{
 				BastionUser: constant.DefaultUbuntuUser,
 				BastionAddr: bastionAddr,

@@ -8,6 +8,7 @@ import (
 
 	createcmd "github.com/unifabric-io/nvair-cli/pkg/commands/create"
 	deletecmd "github.com/unifabric-io/nvair-cli/pkg/commands/delete"
+	getcmd "github.com/unifabric-io/nvair-cli/pkg/commands/get"
 	logincmd "github.com/unifabric-io/nvair-cli/pkg/commands/login"
 	logoutcmd "github.com/unifabric-io/nvair-cli/pkg/commands/logout"
 	"github.com/unifabric-io/nvair-cli/pkg/output"
@@ -55,6 +56,7 @@ func (rc *RootCommand) newCommand() *cobra.Command {
 		rc.newLoginCommand(),
 		rc.newLogoutCommand(),
 		rc.newCreateCommand(),
+		rc.newGetCommand(),
 		rc.newDeleteCommand(),
 	)
 
@@ -65,7 +67,7 @@ func (rc *RootCommand) newLoginCommand() *cobra.Command {
 	loginCmd := logincmd.NewCommand()
 	cmd := &cobra.Command{
 		Use:           "login",
-		Short:         "Authenticate with NVIDIA Virtual Air",
+		Short:         "Authenticate with NVIDIA Air",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -81,7 +83,7 @@ func (rc *RootCommand) newLogoutCommand() *cobra.Command {
 	logoutCmd := logoutcmd.NewCommand()
 	cmd := &cobra.Command{
 		Use:           "logout",
-		Short:         "Log out from NVIDIA Virtual Air",
+		Short:         "Logout from NVIDIA Air",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -112,15 +114,40 @@ func (rc *RootCommand) newCreateCommand() *cobra.Command {
 func (rc *RootCommand) newDeleteCommand() *cobra.Command {
 	deleteCmd := deletecmd.NewCommand()
 	cmd := &cobra.Command{
-		Use:           "delete <simulation|service> <name>",
-		Short:         "Delete a simulation or service",
+		Use:           "delete <simulation> <name>",
+		Short:         "Delete a simulation",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		ValidArgs:     []string{"simulation"},
+		Args: func(cmd *cobra.Command, args []string) error {
+			return deletecmd.ValidateArgs(args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deleteCmd.Verbose = rc.Verbose
-			return deleteCmd.Execute(args)
+			deleteCmd.ResourceType = args[0]
+			deleteCmd.ResourceName = args[1]
+			return deleteCmd.Execute()
 		},
 	}
 	deleteCmd.Register(cmd)
+	return cmd
+}
+
+func (rc *RootCommand) newGetCommand() *cobra.Command {
+	getCommand := getcmd.NewCommand()
+	cmd := &cobra.Command{
+		Use:           "get",
+		Short:         "Get simulations and nodes",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			getCommand.Verbose = rc.Verbose
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	getCommand.Register(cmd)
 	return cmd
 }

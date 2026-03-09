@@ -11,7 +11,7 @@ import (
 
 // NodeMetadata holds parsed metadata from a node
 type NodeMetadata struct {
-	MgmtIP string `json:"mgmt_ip"`
+	MgmtIP string `json:"mgmt_ip" yaml:"mgmtIP"`
 }
 
 // ParseNodeMetadata parses the metadata JSON from a node

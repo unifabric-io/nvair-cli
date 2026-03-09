@@ -15,7 +15,7 @@ import (
 
 // Command represents the delete subcommand.
 type Command struct {
-	ResourceType string // "simulation" or "service"
+	ResourceType string // "simulation"
 	ResourceName string
 	APIEndpoint  string
 	Verbose      bool
@@ -32,9 +32,25 @@ func (dc *Command) Register(cmd *cobra.Command) {
 	flags.StringVar(&dc.APIEndpoint, "api-endpoint", dc.APIEndpoint, "API endpoint URL")
 }
 
-// Execute runs the delete command with positional arguments.
-// Expected: delete <simulation|service> <name>
-func (dc *Command) Execute(args []string) error {
+// ValidateArgs validates positional arguments for the delete command.
+func ValidateArgs(args []string) error {
+	if err := cobra.ExactArgs(2)(nil, args); err != nil {
+		return err
+	}
+
+	if args[0] != "simulation" {
+		return fmt.Errorf("invalid resource type: %s. Must be 'simulation'", args[0])
+	}
+
+	if strings.TrimSpace(args[1]) == "" {
+		return fmt.Errorf("%s name is required", args[0])
+	}
+
+	return nil
+}
+
+// Execute runs the delete command.
+func (dc *Command) Execute() error {
 	if dc.Verbose {
 		logging.SetVerbose(os.Stderr)
 		logging.Verbose("Verbose mode enabled")
@@ -42,19 +58,8 @@ func (dc *Command) Execute(args []string) error {
 
 	logging.Verbose("Delete command started")
 
-	if len(args) < 2 {
-		return fmt.Errorf("usage: nvair delete <simulation|service> <name>")
-	}
-
-	dc.ResourceType = args[0]
-	dc.ResourceName = args[1]
-
-	if dc.ResourceType != "simulation" && dc.ResourceType != "service" {
-		return fmt.Errorf("invalid resource type: %s. Must be 'simulation' or 'service'", dc.ResourceType)
-	}
-
-	if dc.ResourceName == "" {
-		return fmt.Errorf("%s name is required", dc.ResourceType)
+	if dc.ResourceType == "" || dc.ResourceName == "" {
+		return fmt.Errorf("usage: nvair delete <simulation> <name>")
 	}
 
 	logging.Verbose("Deleting %s: %s", dc.ResourceType, dc.ResourceName)
@@ -97,8 +102,8 @@ func (dc *Command) Execute(args []string) error {
 	switch dc.ResourceType {
 	case "simulation":
 		deleteErr = apiClient.DeleteSimulation(dc.ResourceName)
-	case "service":
-		deleteErr = apiClient.DeleteService(dc.ResourceName)
+	default:
+		return fmt.Errorf("invalid resource type: %s. Must be 'simulation'", dc.ResourceType)
 	}
 
 	if deleteErr != nil {

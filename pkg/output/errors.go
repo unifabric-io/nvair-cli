@@ -29,6 +29,22 @@ func NewValidationError(message string) error {
 	}
 }
 
+// NewUsageError creates a usage error.
+func NewUsageError(message string) error {
+	return &Error{
+		Category: "Usage",
+		Message:  message,
+	}
+}
+
+// NewNotFoundError creates a not-found error.
+func NewNotFoundError(message string) error {
+	return &Error{
+		Category: "NotFound",
+		Message:  message,
+	}
+}
+
 // AuthError creates an authentication error.
 func NewAuthError(message string, cause error) error {
 	return &Error{

@@ -24,4 +24,16 @@ const (
 	// DefaultBastionUser is the default SSH username for the bastion host
 	// This password in plain text is safe. It is only used to skip the password reset step. All connections are made using SSH key files.
 	DefaultBastionNewPassword = "dangerous"
+
+	// SwitchConfigRemotePath is where switch configuration is uploaded before apply.
+	SwitchConfigRemotePath = "/home/cumulus/config.yml"
+
+	// OOBMgmtServerName is the name of the OOB management server node.
+	OOBMgmtServerName = "oob-mgmt-server"
+
+	// OOBMgmtSwitchName is the name of the OOB management switch node.
+	OOBMgmtSwitchName = "oob-mgmt-switch"
+
+	// NetplanStagingRemotePath is the temporary netplan upload path on generic Linux nodes.
+	NetplanStagingRemotePath = "/tmp/nvair-netplan.yaml"
 )

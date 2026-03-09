@@ -4,12 +4,15 @@
 package e2e
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/unifabric-io/nvair-cli/pkg/config"
+	"github.com/unifabric-io/nvair-cli/pkg/topology"
+	"gopkg.in/yaml.v3"
 )
 
 // TestIntegration_RealAPI_Create exercises the real NVIDIA Air API using nvair.
@@ -64,6 +67,117 @@ func TestIntegration_RealAPI_Create(t *testing.T) {
 	if !strings.Contains(createResult.Stdout+createResult.Stderr, "Simulation created successfully") {
 		t.Fatalf("unexpected create output: stdout=%q stderr=%q", createResult.Stdout, createResult.Stderr)
 	}
+
+	getSimulationsResult := runCommand(t, env, "get", "simulations")
+	logCommandOutput(t, getSimulationsResult, "TestIntegration_RealAPI_Create_get_simulations")
+	if getSimulationsResult.ExitCode != 0 {
+		t.Fatalf("nvair get simulations failed with exit code %d: %v", getSimulationsResult.ExitCode, getSimulationsResult.Err)
+	}
+	if !strings.Contains(getSimulationsResult.Stdout+getSimulationsResult.Stderr, simName) {
+		t.Fatalf("expected get simulations output to include %q, stdout=%q stderr=%q", simName, getSimulationsResult.Stdout, getSimulationsResult.Stderr)
+	}
+
+	actualNodeNamesJSON := getNodeNameMapFromCLI(t, env, simName, "json")
+	actualNodeNamesYAML := getNodeNameMapFromCLI(t, env, simName, "yaml")
+	expectedNodeNames := loadExpectedNodeNameMapFromTopology(t, topoDir)
+
+	assertAllExpectedNodesPresent(t, expectedNodeNames, actualNodeNamesJSON, "json")
+	assertAllExpectedNodesPresent(t, expectedNodeNames, actualNodeNamesYAML, "yaml")
+}
+
+type cliNodeOutput struct {
+	Name string `json:"name" yaml:"name"`
+}
+
+func getNodeNameMapFromCLI(t *testing.T, env []string, simulationName, outputFormat string) map[string]struct{} {
+	t.Helper()
+
+	result := runCommand(t, env, "get", "nodes", "--simulation", simulationName, "-o", outputFormat)
+	logCommandOutput(t, result, "TestIntegration_RealAPI_Create_get_nodes_"+outputFormat)
+	if result.ExitCode != 0 {
+		t.Fatalf("nvair get nodes -o %s failed with exit code %d: %v", outputFormat, result.ExitCode, result.Err)
+	}
+
+	nodes := parseCLINodeOutput(t, result.Stdout, outputFormat)
+	nameSet := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		name := strings.TrimSpace(node.Name)
+		if name != "" {
+			nameSet[name] = struct{}{}
+		}
+	}
+
+	return nameSet
+}
+
+func parseCLINodeOutput(t *testing.T, stdout, outputFormat string) []cliNodeOutput {
+	t.Helper()
+
+	var nodes []cliNodeOutput
+	var err error
+
+	switch outputFormat {
+	case "json":
+		err = json.Unmarshal([]byte(stdout), &nodes)
+	case "yaml":
+		err = yaml.Unmarshal([]byte(stdout), &nodes)
+	default:
+		t.Fatalf("unsupported output format: %s", outputFormat)
+	}
+
+	if err != nil {
+		t.Fatalf("failed to parse get nodes -o %s output: %v, stdout=%q", outputFormat, err, stdout)
+	}
+
+	return nodes
+}
+
+func loadExpectedNodeNameMapFromTopology(t *testing.T, directory string) map[string]struct{} {
+	t.Helper()
+
+	rawTopology, err := topology.LoadTopologyFromDirectory(directory)
+	if err != nil {
+		t.Fatalf("failed to load topology from %q: %v", directory, err)
+	}
+
+	expected := make(map[string]struct{}, len(rawTopology.Content.Nodes))
+	for nodeKey, nodeValue := range rawTopology.Content.Nodes {
+		nodeName := strings.TrimSpace(nodeKey)
+
+		if nodeMap, ok := nodeValue.(map[string]interface{}); ok {
+			if valueName, ok := nodeMap["name"].(string); ok && strings.TrimSpace(valueName) != "" {
+				nodeName = strings.TrimSpace(valueName)
+			}
+		}
+
+		if nodeName != "" {
+			expected[nodeName] = struct{}{}
+		}
+	}
+
+	if len(expected) == 0 {
+		t.Fatalf("topology at %q contains no nodes", directory)
+	}
+
+	return expected
+}
+
+func assertAllExpectedNodesPresent(t *testing.T, expectedNodeNameMap, actualNodeNameMap map[string]struct{}, outputFormat string) {
+	t.Helper()
+
+	for expectedNodeName := range expectedNodeNameMap {
+		if _, exists := actualNodeNameMap[expectedNodeName]; !exists {
+			t.Fatalf("get nodes -o %s missing expected node %q; actual nodes: %v", outputFormat, expectedNodeName, mapKeys(actualNodeNameMap))
+		}
+	}
+}
+
+func mapKeys(values map[string]struct{}) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func TestIntegration_Create_DryRunNegativeScenarios(t *testing.T) {

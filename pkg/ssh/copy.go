@@ -25,87 +25,108 @@ type BastionCopyConfig struct {
 
 // CopyFileViaBastion copies a local file to the target host through bastion using SCP.
 func CopyFileViaBastion(cfg BastionCopyConfig, localPath, remotePath string) error {
-	signer, err := loadPrivateKeySigner(cfg.BastionKey)
-	if err != nil {
-		return fmt.Errorf("load private key failed: %w", err)
+	copyOnce := func() error {
+		signer, err := loadPrivateKeySigner(cfg.BastionKey)
+		if err != nil {
+			return fmt.Errorf("load private key failed: %w", err)
+		}
+
+		bastionCfg := &ssh.ClientConfig{
+			User:            cfg.BastionUser,
+			Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			Timeout:         cfg.Timeout,
+		}
+
+		bastionClient, err := ssh.Dial("tcp", cfg.BastionAddr, bastionCfg)
+		if err != nil {
+			return fmt.Errorf("ssh dial bastion failed: %w", err)
+		}
+		defer bastionClient.Close()
+
+		targetClient, err := dialHostThroughBastion(bastionClient, cfg.TargetAddr, cfg.TargetUser, cfg.TargetPass, cfg.Timeout)
+		if err != nil {
+			return err
+		}
+		defer targetClient.Close()
+
+		fileInfo, err := os.Stat(localPath)
+		if err != nil {
+			return fmt.Errorf("stat local file failed: %w", err)
+		}
+
+		f, err := os.Open(localPath)
+		if err != nil {
+			return fmt.Errorf("open local file failed: %w", err)
+		}
+		defer f.Close()
+
+		session, err := targetClient.NewSession()
+		if err != nil {
+			return fmt.Errorf("new session failed: %w", err)
+		}
+		defer session.Close()
+
+		stdin, err := session.StdinPipe()
+		if err != nil {
+			return fmt.Errorf("stdin pipe failed: %w", err)
+		}
+		stdout, err := session.StdoutPipe()
+		if err != nil {
+			return fmt.Errorf("stdout pipe failed: %w", err)
+		}
+
+		if err := session.Start(fmt.Sprintf("scp -t %s", remotePath)); err != nil {
+			return fmt.Errorf("start scp failed: %w", err)
+		}
+
+		if err := scpReadResponse(stdout); err != nil {
+			return fmt.Errorf("scp ack failed: %w", err)
+		}
+
+		header := fmt.Sprintf("C%04o %d %s\n", fileInfo.Mode()&0o777, fileInfo.Size(), filepath.Base(remotePath))
+		if _, err := io.WriteString(stdin, header); err != nil {
+			return fmt.Errorf("write scp header failed: %w", err)
+		}
+		if err := scpReadResponse(stdout); err != nil {
+			return fmt.Errorf("scp header ack failed: %w", err)
+		}
+
+		if _, err := io.Copy(stdin, f); err != nil {
+			return fmt.Errorf("copy file data failed: %w", err)
+		}
+		if _, err := stdin.Write([]byte{0}); err != nil {
+			return fmt.Errorf("write scp end failed: %w", err)
+		}
+		if err := scpReadResponse(stdout); err != nil {
+			return fmt.Errorf("scp data ack failed: %w", err)
+		}
+
+		if err := stdin.Close(); err != nil {
+			return fmt.Errorf("close stdin failed: %w", err)
+		}
+
+		return session.Wait()
 	}
 
-	bastionCfg := &ssh.ClientConfig{
-		User:            cfg.BastionUser,
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         cfg.Timeout,
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+		}
+
+		if err := copyOnce(); err != nil {
+			lastErr = err
+			if !shouldRetry(err) {
+				return err
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		return nil
 	}
 
-	bastionClient, err := ssh.Dial("tcp", cfg.BastionAddr, bastionCfg)
-	if err != nil {
-		return fmt.Errorf("ssh dial bastion failed: %w", err)
-	}
-	defer bastionClient.Close()
-
-	targetClient, err := dialHostThroughBastion(bastionClient, cfg.TargetAddr, cfg.TargetUser, cfg.TargetPass, cfg.Timeout)
-	if err != nil {
-		return err
-	}
-	defer targetClient.Close()
-
-	fileInfo, err := os.Stat(localPath)
-	if err != nil {
-		return fmt.Errorf("stat local file failed: %w", err)
-	}
-
-	f, err := os.Open(localPath)
-	if err != nil {
-		return fmt.Errorf("open local file failed: %w", err)
-	}
-	defer f.Close()
-
-	session, err := targetClient.NewSession()
-	if err != nil {
-		return fmt.Errorf("new session failed: %w", err)
-	}
-	defer session.Close()
-
-	stdin, err := session.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("stdin pipe failed: %w", err)
-	}
-	stdout, err := session.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("stdout pipe failed: %w", err)
-	}
-
-	if err := session.Start(fmt.Sprintf("scp -t %s", remotePath)); err != nil {
-		return fmt.Errorf("start scp failed: %w", err)
-	}
-
-	if err := scpReadResponse(stdout); err != nil {
-		return fmt.Errorf("scp ack failed: %w", err)
-	}
-
-	header := fmt.Sprintf("C%04o %d %s\n", fileInfo.Mode()&0o777, fileInfo.Size(), filepath.Base(remotePath))
-	if _, err := io.WriteString(stdin, header); err != nil {
-		return fmt.Errorf("write scp header failed: %w", err)
-	}
-	if err := scpReadResponse(stdout); err != nil {
-		return fmt.Errorf("scp header ack failed: %w", err)
-	}
-
-	if _, err := io.Copy(stdin, f); err != nil {
-		return fmt.Errorf("copy file data failed: %w", err)
-	}
-	if _, err := stdin.Write([]byte{0}); err != nil {
-		return fmt.Errorf("write scp end failed: %w", err)
-	}
-	if err := scpReadResponse(stdout); err != nil {
-		return fmt.Errorf("scp data ack failed: %w", err)
-	}
-
-	if err := stdin.Close(); err != nil {
-		return fmt.Errorf("close stdin failed: %w", err)
-	}
-
-	return session.Wait()
+	return lastErr
 }
 
 // dialHostThroughBastion opens a TCP channel via bastion and builds an SSH client to the target host.
