@@ -33,7 +33,7 @@ test-unit:
 
 test-e2e: build
 	@echo "Running E2E tests..."
-	go test -v ./e2e -tags=e2e
+	go test -v ./e2e -tags=e2e -timeout 30m
 
 test-coverage:
 	@echo "Generating coverage report (unit tests only)..."

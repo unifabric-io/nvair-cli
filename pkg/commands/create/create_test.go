@@ -269,6 +269,14 @@ func TestJoinErrors(t *testing.T) {
 	}
 }
 
+func TestFormatBastionSSHCommand(t *testing.T) {
+	got := formatBastionSSHCommand("worker01.air.nvidia.com", 16821, "/tmp/my key")
+	want := "ssh -i '/tmp/my key' -p 16821 ubuntu@worker01.air.nvidia.com"
+	if got != want {
+		t.Fatalf("formatBastionSSHCommand() = %q, want %q", got, want)
+	}
+}
+
 func writeTestTopology(t *testing.T, dir, content string) {
 	t.Helper()
 	writeTestFile(t, filepath.Join(dir, "topology.json"), content)

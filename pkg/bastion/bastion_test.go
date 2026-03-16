@@ -343,6 +343,184 @@ func TestExecCommandViaBastionSuccess(t *testing.T) {
 	}
 }
 
+func TestInteractiveSessionOnBastionCallsSharedHelper(t *testing.T) {
+	clientKey, clientSigner := generateSigner(t)
+	keyPath := writePrivateKey(t, clientKey)
+
+	bastionAddr, stopBastion := startBastionSSHServer(t, clientSigner.PublicKey(), func(cmd string) (string, string, int) {
+		return "", "", 0
+	})
+	defer stopBastion()
+
+	orig := startInteractiveSessionFn
+	t.Cleanup(func() {
+		startInteractiveSessionFn = orig
+	})
+
+	called := false
+	startInteractiveSessionFn = func(client *ssh.Client) error {
+		if client == nil {
+			t.Fatalf("expected non-nil ssh client")
+		}
+		called = true
+		return nil
+	}
+
+	cfg := BastionExecConfig{
+		BastionUser: "bastion",
+		BastionAddr: bastionAddr,
+		BastionKey:  keyPath,
+	}
+
+	if err := InteractiveSessionOnBastion(cfg); err != nil {
+		t.Fatalf("InteractiveSessionOnBastion error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected shared interactive helper to be called")
+	}
+}
+
+func TestInteractiveSessionViaBastionCallsSharedHelper(t *testing.T) {
+	clientKey, clientSigner := generateSigner(t)
+	keyPath := writePrivateKey(t, clientKey)
+
+	const targetUser = "target"
+	const targetPass = "secret"
+
+	targetAddr, stopTarget := startTargetSSHServer(t, targetUser, targetPass, func(cmd string) (string, string, int) {
+		return "", "", 0
+	})
+	defer stopTarget()
+
+	bastionAddr, stopBastion := startBastionSSHServer(t, clientSigner.PublicKey(), func(cmd string) (string, string, int) {
+		return "", "", 0
+	})
+	defer stopBastion()
+
+	orig := startInteractiveSessionFn
+	t.Cleanup(func() {
+		startInteractiveSessionFn = orig
+	})
+
+	called := false
+	startInteractiveSessionFn = func(client *ssh.Client) error {
+		if client == nil {
+			t.Fatalf("expected non-nil ssh client")
+		}
+		called = true
+		return nil
+	}
+
+	cfg := BastionExecConfig{
+		BastionUser: "bastion",
+		BastionAddr: bastionAddr,
+		BastionKey:  keyPath,
+		TargetUser:  targetUser,
+		TargetAddr:  targetAddr,
+		TargetPass:  targetPass,
+	}
+
+	if err := InteractiveSessionViaBastion(cfg); err != nil {
+		t.Fatalf("InteractiveSessionViaBastion error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected shared interactive helper to be called")
+	}
+}
+
+func TestInteractiveCommandOnBastionCallsSharedHelper(t *testing.T) {
+	clientKey, clientSigner := generateSigner(t)
+	keyPath := writePrivateKey(t, clientKey)
+
+	bastionAddr, stopBastion := startBastionSSHServer(t, clientSigner.PublicKey(), func(cmd string) (string, string, int) {
+		return "", "", 0
+	})
+	defer stopBastion()
+
+	orig := startInteractiveCommandFn
+	t.Cleanup(func() {
+		startInteractiveCommandFn = orig
+	})
+
+	called := false
+	startInteractiveCommandFn = func(client *ssh.Client, command string) error {
+		if client == nil {
+			t.Fatalf("expected non-nil ssh client")
+		}
+		if command != "bash" {
+			t.Fatalf("unexpected command: %q", command)
+		}
+		called = true
+		return nil
+	}
+
+	cfg := BastionExecConfig{
+		BastionUser: "bastion",
+		BastionAddr: bastionAddr,
+		BastionKey:  keyPath,
+		Command:     "bash",
+	}
+
+	if err := InteractiveCommandOnBastion(cfg); err != nil {
+		t.Fatalf("InteractiveCommandOnBastion error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected shared interactive command helper to be called")
+	}
+}
+
+func TestInteractiveCommandViaBastionCallsSharedHelper(t *testing.T) {
+	clientKey, clientSigner := generateSigner(t)
+	keyPath := writePrivateKey(t, clientKey)
+
+	const targetUser = "target"
+	const targetPass = "secret"
+
+	targetAddr, stopTarget := startTargetSSHServer(t, targetUser, targetPass, func(cmd string) (string, string, int) {
+		return "", "", 0
+	})
+	defer stopTarget()
+
+	bastionAddr, stopBastion := startBastionSSHServer(t, clientSigner.PublicKey(), func(cmd string) (string, string, int) {
+		return "", "", 0
+	})
+	defer stopBastion()
+
+	orig := startInteractiveCommandFn
+	t.Cleanup(func() {
+		startInteractiveCommandFn = orig
+	})
+
+	called := false
+	startInteractiveCommandFn = func(client *ssh.Client, command string) error {
+		if client == nil {
+			t.Fatalf("expected non-nil ssh client")
+		}
+		if command != "bash -l" {
+			t.Fatalf("unexpected command: %q", command)
+		}
+		called = true
+		return nil
+	}
+
+	cfg := BastionExecConfig{
+		BastionUser: "bastion",
+		BastionAddr: bastionAddr,
+		BastionKey:  keyPath,
+		TargetUser:  targetUser,
+		TargetAddr:  targetAddr,
+		TargetPass:  targetPass,
+		Command:     "bash -l",
+	}
+
+	if err := InteractiveCommandViaBastion(cfg); err != nil {
+		t.Fatalf("InteractiveCommandViaBastion error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected shared interactive command helper to be called")
+	}
+}
+
 func TestWaitPingViaBastionTimeout(t *testing.T) {
 	clientKey, clientSigner := generateSigner(t)
 	keyPath := writePrivateKey(t, clientKey)

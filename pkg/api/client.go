@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	forwardutil "github.com/unifabric-io/nvair-cli/pkg/forward"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
 	"github.com/unifabric-io/nvair-cli/pkg/topology"
 )
@@ -278,7 +279,7 @@ type EnableSSHResponse struct {
 }
 
 // CreateService creates a service for a simulation interface.
-// serviceName: the name of the service (e.g., "oob-mgmt-server-ssh", "k8s-api-server")
+// serviceName: the name of the service (e.g., "forward-22->oob-mgmt-server:22", "k8s-api-server")
 // destPort: the destination port on the target interface (e.g., 22 for SSH, 6443 for Kubernetes API)
 // serviceType: the type of service (e.g., "ssh", "kubernetes")
 // Returns the service details including the host and port information.
@@ -321,16 +322,48 @@ func (c *Client) CreateService(simulationID, interfaceID, serviceName string, de
 	return &svcResp, nil
 }
 
-// CreateSSHService creates an SSH service for a simulation interface.
+// CreateSSHService creates the default bastion SSH service for a simulation interface.
 // Returns the service details including the host and port information.
 func (c *Client) CreateSSHService(simulationID, interfaceID string) (*EnableSSHResponse, error) {
-	return c.CreateService(simulationID, interfaceID, "oob-mgmt-server-ssh", 22, "ssh")
+	return c.CreateService(simulationID, interfaceID, forwardutil.BuildBastionSSHServiceName(), 22, "ssh")
 }
 
 // CreateKubernetesAPIService creates a Kubernetes API service for a simulation interface.
 // Returns the service details including the host and port information.
 func (c *Client) CreateKubernetesAPIService(simulationID, interfaceID string) (*EnableSSHResponse, error) {
 	return c.CreateService(simulationID, interfaceID, "k8s-api-server", 6443, "other")
+}
+
+// GetServices lists services for a simulation.
+func (c *Client) GetServices(simulationID string) ([]EnableSSHResponse, error) {
+	logging.Verbose("GetServices: Fetching services for simulation: %s", simulationID)
+
+	query := url.Values{}
+	query.Set("simulation", simulationID)
+	path := fmt.Sprintf("/v1/service?%s", query.Encode())
+
+	resp, err := c.doRequest("GET", path, nil, true)
+	if err != nil {
+		logging.Verbose("GetServices: Request failed with error: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("GetServices: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("get services failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var services []EnableSSHResponse
+	if err := json.Unmarshal(bodyBytes, &services); err != nil {
+		logging.Verbose("GetServices: Failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode get services response: %w", err)
+	}
+
+	logging.Verbose("GetServices: Successfully retrieved %d services", len(services))
+	return services, nil
 }
 
 // doRequest performs an HTTP request with retry logic and bearer token injection.
@@ -506,9 +539,10 @@ func (c *Client) ControlSimulation(simulationID, state string) (*ControlSimulati
 
 // SimulationInfo represents a single simulation in the list response
 type SimulationInfo struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	State string `json:"state"`
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	State   string `json:"state"`
+	Created string `json:"created"`
 }
 
 // ListSimulationsResponse represents the response body for GET /v2/simulations
@@ -690,6 +724,36 @@ func (c *Client) DeleteService(name string) error {
 	}
 
 	logging.Verbose("DeleteService: Successfully deleted service: %s", name)
+	return nil
+}
+
+// DeleteServiceByID deletes a service by its ID.
+func (c *Client) DeleteServiceByID(serviceID string) error {
+	logging.Verbose("DeleteServiceByID: Starting deletion of service ID: %s", serviceID)
+
+	endpoint := fmt.Sprintf("/v1/service/%s/", serviceID)
+	logging.Verbose("DeleteServiceByID: Sending DELETE request to %s", endpoint)
+
+	resp, err := c.doRequest("DELETE", endpoint, nil, true)
+	if err != nil {
+		logging.Verbose("DeleteServiceByID: Request failed with error: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusNotFound {
+		logging.Verbose("DeleteServiceByID: Service not found (404)")
+		return fmt.Errorf("service '%s' not found", serviceID)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logging.Verbose("DeleteServiceByID: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		return fmt.Errorf("delete service failed: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	logging.Verbose("DeleteServiceByID: Successfully deleted service ID: %s", serviceID)
 	return nil
 }
 

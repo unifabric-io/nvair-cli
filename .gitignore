@@ -12,6 +12,7 @@ build/
 
 # Dependencies
 node_modules/
+vendor/
 
 # OS files
 .DS_Store
@@ -32,3 +33,6 @@ coverage.out
 
 # Temp files
 *.tmp
+
+## AI
+.codex/

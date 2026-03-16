@@ -129,6 +129,12 @@ func FormatError(err error) string {
 	case *PartialError:
 		return fmt.Sprintf("✗ %s\n   %s", e.Message, e.Details)
 
+	case *ExitCodeError:
+		if e.Silent {
+			return ""
+		}
+		return "✗ Error: command failed"
+
 	default:
 		return fmt.Sprintf("✗ Error: %v", err)
 	}

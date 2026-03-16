@@ -513,6 +513,125 @@ func TestControlSimulation_Error(t *testing.T) {
 	}
 }
 
+func TestGetServices_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/service" || r.Method != "GET" {
+			http.NotFound(w, r)
+			return
+		}
+
+		if r.URL.Query().Get("simulation") != "sim-123" {
+			http.Error(w, "invalid simulation query", http.StatusBadRequest)
+			return
+		}
+
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, "missing auth", http.StatusUnauthorized)
+			return
+		}
+
+		resp := []EnableSSHResponse{
+			{
+				ID:          "svc-1",
+				Name:        "forward-22->oob-mgmt-server:22",
+				ServiceType: "ssh",
+				Host:        "worker01.air.nvidia.com",
+				SrcPort:     16821,
+			},
+			{
+				ID:          "svc-2",
+				Name:        "k8s-default-my-web-app-30080",
+				ServiceType: "tcp",
+				Host:        "worker01.air.nvidia.com",
+				SrcPort:     17922,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	services, err := client.GetServices("sim-123")
+	if err != nil {
+		t.Fatalf("GetServices failed: %v", err)
+	}
+
+	if len(services) != 2 {
+		t.Fatalf("expected 2 services, got %d", len(services))
+	}
+	if services[0].ServiceType != "ssh" {
+		t.Fatalf("expected first service_type ssh, got %q", services[0].ServiceType)
+	}
+	if services[0].SrcPort != 16821 {
+		t.Fatalf("expected first src_port 16821, got %d", services[0].SrcPort)
+	}
+}
+
+func TestGetServices_Error(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/service" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"simulation not found"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	_, err := client.GetServices("sim-404")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("404")) {
+		t.Errorf("Expected 404 error, got: %v", err)
+	}
+}
+
+func TestDeleteServiceByID_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/service/svc-123/" && r.Method == "DELETE" {
+			if r.Header.Get("Authorization") != "Bearer test-token" {
+				http.Error(w, "missing auth", http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	if err := client.DeleteServiceByID("svc-123"); err != nil {
+		t.Fatalf("DeleteServiceByID failed: %v", err)
+	}
+}
+
+func TestDeleteServiceByID_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/service/svc-404/" && r.Method == "DELETE" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"service not found"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	err := client.DeleteServiceByID("svc-404")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("not found")) {
+		t.Errorf("expected not found error, got: %v", err)
+	}
+}
+
 // TestGetNodes_Success tests retrieving nodes list.
 func TestGetNodes_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -15,9 +18,11 @@ import (
 	"github.com/unifabric-io/nvair-cli/pkg/api"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
 	"github.com/unifabric-io/nvair-cli/pkg/constant"
+	forwardutil "github.com/unifabric-io/nvair-cli/pkg/forward"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
 	"github.com/unifabric-io/nvair-cli/pkg/node"
 	"github.com/unifabric-io/nvair-cli/pkg/output"
+	"github.com/unifabric-io/nvair-cli/pkg/simulation"
 )
 
 const (
@@ -50,10 +55,26 @@ type NodeView struct {
 
 // SimulationSummary is the enriched view of a simulation used in `get simulations` output.
 type SimulationSummary struct {
-	ID    string    `json:"id"    yaml:"id"`
-	Title string    `json:"title" yaml:"title"`
-	State string    `json:"state" yaml:"state"`
-	Count NodeCount `json:"count" yaml:"count"`
+	ID      string    `json:"id"      yaml:"id"`
+	Title   string    `json:"title"   yaml:"title"`
+	State   string    `json:"state"   yaml:"state"`
+	Created string    `json:"created" yaml:"created"`
+	Count   NodeCount `json:"count"   yaml:"count"`
+}
+
+// ForwardView is the representation for `get forward` output.
+type ForwardView struct {
+	ID          string `json:"id"           yaml:"id"`
+	Name        string `json:"name"         yaml:"name"`
+	ServiceType string `json:"service_type" yaml:"service_type"`
+	NodeName    string `json:"node_name"    yaml:"node_name"`
+	DestPort    int    `json:"dest_port"    yaml:"dest_port"`
+	SrcPort     int    `json:"src_port"     yaml:"src_port"`
+	Host        string `json:"host"         yaml:"host"`
+	Link        string `json:"link"         yaml:"link"`
+	Address     string `json:"address"      yaml:"address"`
+	TargetHost  string `json:"target_host,omitempty" yaml:"target_host,omitempty"`
+	TargetPort  int    `json:"target_port,omitempty" yaml:"target_port,omitempty"`
 }
 
 // Command represents the get subcommand.
@@ -94,10 +115,23 @@ func (gc *Command) Register(cmd *cobra.Command) {
 			return gc.executeNodes(cmd)
 		},
 	}
-	nodesCmd.Flags().StringVarP(&gc.SimulationName, "simulation", "s", "", "Simulation name (required)")
+	nodesCmd.Flags().StringVarP(&gc.SimulationName, "simulation", "s", "", "Simulation name (optional when only one simulation exists)")
 	nodesCmd.Flags().StringVarP(&gc.OutputFormat, "output", "o", "", "Output format: json|yaml")
 
-	cmd.AddCommand(simCmd, nodesCmd)
+	forwardCmd := &cobra.Command{
+		Use:     "forward",
+		Aliases: []string{"forwards"},
+		Short:   "List forward services in a simulation",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			gc.OutputFormat = strings.TrimSpace(gc.OutputFormat)
+			gc.SimulationName = strings.TrimSpace(gc.SimulationName)
+			return gc.executeForward(cmd)
+		},
+	}
+	forwardCmd.Flags().StringVarP(&gc.SimulationName, "simulation", "s", "", "Simulation name (optional when only one simulation exists)")
+	forwardCmd.Flags().StringVarP(&gc.OutputFormat, "output", "o", "", "Output format: json|yaml")
+
+	cmd.AddCommand(simCmd, nodesCmd, forwardCmd)
 }
 
 func (gc *Command) executeSimulations(cmd *cobra.Command) error {
@@ -135,10 +169,6 @@ func (gc *Command) executeSimulations(cmd *cobra.Command) error {
 func (gc *Command) executeNodes(cmd *cobra.Command) error {
 	gc.configureVerbose()
 
-	if gc.SimulationName == "" {
-		return output.NewValidationError("--simulation <name> is required")
-	}
-
 	format, err := normalizeOutputFormat(gc.OutputFormat)
 	if err != nil {
 		return err
@@ -149,12 +179,15 @@ func (gc *Command) executeNodes(cmd *cobra.Command) error {
 		return err
 	}
 
-	simulationID, err := gc.resolveSimulationID(apiClient, gc.SimulationName)
+	resolvedSimulation, err := simulation.Resolve(apiClient, gc.SimulationName)
 	if err != nil {
 		return err
 	}
+	if resolvedSimulation.AutoSelected {
+		_ = simulation.WriteDefaultSelectionNotice(cmd.ErrOrStderr(), resolvedSimulation.Name)
+	}
 
-	nodes, err := apiClient.GetNodes(simulationID)
+	nodes, err := apiClient.GetNodes(resolvedSimulation.ID)
 	if err != nil {
 		return err
 	}
@@ -169,19 +202,34 @@ func (gc *Command) executeNodes(cmd *cobra.Command) error {
 	return renderNodeOutput(cmd.OutOrStdout(), views, format)
 }
 
-func (gc *Command) resolveSimulationID(apiClient *api.Client, simulationName string) (string, error) {
-	simulations, err := apiClient.GetSimulations()
+func (gc *Command) executeForward(cmd *cobra.Command) error {
+	gc.configureVerbose()
+
+	format, err := normalizeOutputFormat(gc.OutputFormat)
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	for _, sim := range simulations {
-		if sim.Title == simulationName {
-			return sim.ID, nil
-		}
+	apiClient, _, err := ensureAuthenticatedClient(gc.APIEndpoint)
+	if err != nil {
+		return err
 	}
 
-	return "", output.NewNotFoundError(fmt.Sprintf("simulation not found: %s", simulationName))
+	resolvedSimulation, err := simulation.Resolve(apiClient, gc.SimulationName)
+	if err != nil {
+		return err
+	}
+	if resolvedSimulation.AutoSelected {
+		_ = simulation.WriteDefaultSelectionNotice(cmd.ErrOrStderr(), resolvedSimulation.Name)
+	}
+
+	services, err := apiClient.GetServices(resolvedSimulation.ID)
+	if err != nil {
+		return err
+	}
+
+	forwards := buildForwardViews(services)
+	return renderForwardOutput(cmd.OutOrStdout(), forwards, format)
 }
 
 func (gc *Command) configureVerbose() {
@@ -218,15 +266,20 @@ func renderSimulationOutput(w io.Writer, summaries []SimulationSummary, format s
 
 		rows := make([][]string, 0, len(summaries))
 		for _, s := range summaries {
+			created := s.Created
+			if t, err := time.Parse(time.RFC3339Nano, s.Created); err == nil {
+				created = t.Local().Format("2006-01-02 15:04:05")
+			}
 			rows = append(rows, []string{
 				s.Title,
 				s.State,
+				created,
 				s.ID,
 				fmt.Sprintf("%d", s.Count.Switch),
 				fmt.Sprintf("%d", s.Count.Host),
 			})
 		}
-		return writeTable(w, []string{"NAME", "STATUS", "ID", "SWITCH", "HOST"}, rows)
+		return writeTable(w, []string{"NAME", "STATUS", "CREATED", "ID", "SWITCH", "HOST"}, rows)
 	}
 }
 
@@ -264,13 +317,72 @@ func buildSimulationSummaries(simulations []api.SimulationInfo, allNodes []api.N
 			counts = &NodeCount{}
 		}
 		summaries = append(summaries, SimulationSummary{
-			ID:    sim.ID,
-			Title: sim.Title,
-			State: sim.State,
-			Count: *counts,
+			ID:      sim.ID,
+			Title:   sim.Title,
+			State:   sim.State,
+			Created: sim.Created,
+			Count:   *counts,
 		})
 	}
 	return summaries
+}
+
+func buildForwardViews(services []api.EnableSSHResponse) []ForwardView {
+	views := make([]ForwardView, 0, len(services))
+	for _, service := range services {
+		targetHost, targetPort := resolveForwardTarget(service)
+		views = append(views, ForwardView{
+			ID:          service.ID,
+			Name:        service.Name,
+			ServiceType: service.ServiceType,
+			NodeName:    service.NodeName,
+			DestPort:    service.DestPort,
+			SrcPort:     service.SrcPort,
+			Host:        service.Host,
+			Link:        service.Link,
+			Address:     resolveForwardAddress(service),
+			TargetHost:  targetHost,
+			TargetPort:  targetPort,
+		})
+	}
+
+	sort.SliceStable(views, func(i, j int) bool {
+		if views[i].Name == views[j].Name {
+			return views[i].SrcPort < views[j].SrcPort
+		}
+		return views[i].Name < views[j].Name
+	})
+
+	return views
+}
+
+func resolveForwardTarget(service api.EnableSSHResponse) (string, int) {
+	if parsed, ok := forwardutil.ParseServiceName(service.Name); ok {
+		return parsed.TargetHost, parsed.TargetPort
+	}
+	if forwardutil.IsBastionSSHServiceName(service.Name) {
+		return constant.OOBMgmtServerName, 22
+	}
+
+	return service.NodeName, service.DestPort
+}
+
+func resolveForwardAddress(service api.EnableSSHResponse) string {
+	if link := strings.TrimSpace(service.Link); link != "" {
+		return link
+	}
+
+	host := strings.TrimSpace(service.Host)
+	switch {
+	case host != "" && service.SrcPort > 0:
+		return net.JoinHostPort(host, strconv.Itoa(service.SrcPort))
+	case host != "":
+		return host
+	case service.SrcPort > 0:
+		return strconv.Itoa(service.SrcPort)
+	default:
+		return "-"
+	}
 }
 
 func renderNodeOutput(w io.Writer, nodes []NodeView, format string) error {
@@ -298,6 +410,57 @@ func renderNodeOutput(w io.Writer, nodes []NodeView, format string) error {
 			rows = append(rows, []string{node.Name, node.State, mgmtIP, osDisplay})
 		}
 		return writeTable(w, []string{"NAME", "STATUS", "MGMT_IP", "IMAGE"}, rows)
+	}
+}
+
+func renderForwardOutput(w io.Writer, forwards []ForwardView, format string) error {
+	switch format {
+	case formatJSON:
+		return writeJSON(w, forwards)
+	case formatYAML:
+		return writeYAML(w, forwards)
+	default:
+		if len(forwards) == 0 {
+			_, err := fmt.Fprintln(w, "No forwards found")
+			return err
+		}
+
+		rows := make([][]string, 0, len(forwards))
+		for _, forward := range forwards {
+			// Strip scheme and userinfo from address to get plain host:port
+			external := forward.Address
+			if idx := strings.Index(external, "://"); idx >= 0 {
+				external = external[idx+3:]
+			}
+			if idx := strings.Index(external, "@"); idx >= 0 {
+				external = external[idx+1:]
+			}
+			external = strings.TrimRight(external, "/")
+			if external == "" {
+				external = "-"
+			}
+
+			destHost := forward.TargetHost
+			if destHost == "" {
+				destHost = forward.NodeName
+			}
+			destPort := forward.TargetPort
+			if destPort == 0 {
+				destPort = forward.DestPort
+			}
+			dest := destHost
+			if destHost != "" && destPort > 0 {
+				dest = net.JoinHostPort(destHost, strconv.Itoa(destPort))
+			}
+
+			rows = append(rows, []string{
+				forward.Name,
+				external,
+				dest,
+				forward.ServiceType,
+			})
+		}
+		return writeTable(w, []string{"NAME", "EXTERNAL", "TARGET", "TYPE"}, rows)
 	}
 }
 
