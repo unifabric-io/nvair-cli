@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/unifabric-io/nvair-cli/pkg/constant"
@@ -174,5 +175,18 @@ func (cc *Command) Execute() error {
 	}
 
 	logging.Info("✓ Create simulation successfully.")
+	logging.Info("  Bastion SSH address: %s", bastionAddr)
+	logging.Info("  Bastion SSH command: %s", formatBastionSSHCommand(sshResponse.Host, sshResponse.SrcPort, keyPath))
 	return nil
+}
+
+func formatBastionSSHCommand(host string, port int, keyPath string) string {
+	return fmt.Sprintf("ssh -i %s -p %d %s@%s", shellQuote(keyPath), port, constant.DefaultUbuntuUser, host)
+}
+
+func shellQuote(arg string) string {
+	if arg == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(arg, "'", `'"'"'`) + "'"
 }

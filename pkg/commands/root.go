@@ -6,11 +6,15 @@ import (
 
 	"github.com/spf13/cobra"
 
+	addcmd "github.com/unifabric-io/nvair-cli/pkg/commands/add"
+	cpcmd "github.com/unifabric-io/nvair-cli/pkg/commands/cp"
 	createcmd "github.com/unifabric-io/nvair-cli/pkg/commands/create"
 	deletecmd "github.com/unifabric-io/nvair-cli/pkg/commands/delete"
+	execcmd "github.com/unifabric-io/nvair-cli/pkg/commands/exec"
 	getcmd "github.com/unifabric-io/nvair-cli/pkg/commands/get"
 	logincmd "github.com/unifabric-io/nvair-cli/pkg/commands/login"
 	logoutcmd "github.com/unifabric-io/nvair-cli/pkg/commands/logout"
+	printsshcommandcmd "github.com/unifabric-io/nvair-cli/pkg/commands/printsshcommand"
 	"github.com/unifabric-io/nvair-cli/pkg/output"
 )
 
@@ -31,7 +35,12 @@ func (rc *RootCommand) Run(args []string) int {
 	cmd.SetArgs(args)
 
 	if err := cmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, output.FormatError(err))
+		if message := output.FormatError(err); message != "" {
+			fmt.Fprintln(os.Stderr, message)
+		}
+		if code, ok := output.ExitCodeFromError(err); ok {
+			return code
+		}
 		return 1
 	}
 
@@ -55,8 +64,12 @@ func (rc *RootCommand) newCommand() *cobra.Command {
 	rootCmd.AddCommand(
 		rc.newLoginCommand(),
 		rc.newLogoutCommand(),
+		rc.newAddCommand(),
 		rc.newCreateCommand(),
 		rc.newGetCommand(),
+		rc.newPrintSSHCommand(),
+		rc.newCopyCommand(),
+		rc.newExecCommand(),
 		rc.newDeleteCommand(),
 	)
 
@@ -95,6 +108,25 @@ func (rc *RootCommand) newLogoutCommand() *cobra.Command {
 	return cmd
 }
 
+func (rc *RootCommand) newAddCommand() *cobra.Command {
+	addCommand := addcmd.NewCommand()
+	cmd := &cobra.Command{
+		Use:           "add",
+		Short:         "Add resources",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			addCommand.Verbose = rc.Verbose
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	addCommand.Register(cmd)
+	return cmd
+}
+
 func (rc *RootCommand) newCreateCommand() *cobra.Command {
 	createCmd := createcmd.NewCommand()
 	cmd := &cobra.Command{
@@ -115,7 +147,7 @@ func (rc *RootCommand) newDeleteCommand() *cobra.Command {
 	deleteCmd := deletecmd.NewCommand()
 	cmd := &cobra.Command{
 		Use:           "delete <simulation> <name>",
-		Short:         "Delete a simulation",
+		Short:         "Delete resources",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		ValidArgs:     []string{"simulation"},
@@ -124,12 +156,36 @@ func (rc *RootCommand) newDeleteCommand() *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deleteCmd.Verbose = rc.Verbose
+			deleteCmd.Stderr = cmd.ErrOrStderr()
 			deleteCmd.ResourceType = args[0]
 			deleteCmd.ResourceName = args[1]
 			return deleteCmd.Execute()
 		},
 	}
 	deleteCmd.Register(cmd)
+
+	forwardCmd := &cobra.Command{
+		Use:           "forward",
+		Aliases:       []string{"forwards"},
+		Short:         "Delete a forward service by target",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			deleteCmd.Verbose = rc.Verbose
+			deleteCmd.Stderr = cmd.ErrOrStderr()
+			deleteCmd.ResourceType = "forward"
+			deleteCmd.SimulationName, _ = cmd.Flags().GetString("simulation")
+			deleteCmd.TargetNode, _ = cmd.Flags().GetString("target-node")
+			deleteCmd.TargetPort, _ = cmd.Flags().GetInt("target-port")
+			return deleteCmd.Execute()
+		},
+	}
+	forwardCmd.Flags().StringP("simulation", "s", "", "Simulation name (optional when only one simulation exists)")
+	forwardCmd.Flags().StringVar(&deleteCmd.TargetNode, "target-node", "", "Target node name")
+	forwardCmd.Flags().IntVar(&deleteCmd.TargetPort, "target-port", 0, "Target port on target node")
+	cmd.AddCommand(forwardCmd)
+
 	return cmd
 }
 
@@ -137,7 +193,7 @@ func (rc *RootCommand) newGetCommand() *cobra.Command {
 	getCommand := getcmd.NewCommand()
 	cmd := &cobra.Command{
 		Use:           "get",
-		Short:         "Get simulations and nodes",
+		Short:         "Get simulations, nodes, and forwards",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -149,5 +205,58 @@ func (rc *RootCommand) newGetCommand() *cobra.Command {
 		},
 	}
 	getCommand.Register(cmd)
+	return cmd
+}
+
+func (rc *RootCommand) newPrintSSHCommand() *cobra.Command {
+	printSSHCommand := printsshcommandcmd.NewCommand()
+	cmd := &cobra.Command{
+		Use:           "print-ssh-command",
+		Aliases:       []string{"print-ssh", "ssh-command"},
+		Short:         "Print SSH command for bastion host",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			printSSHCommand.Verbose = rc.Verbose
+			return printSSHCommand.Execute(cmd)
+		},
+	}
+	printSSHCommand.Register(cmd)
+	return cmd
+}
+
+func (rc *RootCommand) newExecCommand() *cobra.Command {
+	execCommand := execcmd.NewCommand()
+	cmd := &cobra.Command{
+		Use:           "exec <node-name>",
+		Short:         "Execute commands on simulation nodes via SSH",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			execCommand.Verbose = rc.Verbose
+			execCommand.Stderr = cmd.ErrOrStderr()
+			return execCommand.Execute(args, cmd.ArgsLenAtDash())
+		},
+	}
+	execCommand.Register(cmd)
+	return cmd
+}
+
+func (rc *RootCommand) newCopyCommand() *cobra.Command {
+	copyCommand := cpcmd.NewCommand()
+	cmd := &cobra.Command{
+		Use:           "cp <src> <dest>",
+		Short:         "Copy files between local machine and simulation nodes",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			copyCommand.Verbose = rc.Verbose
+			copyCommand.Stderr = cmd.ErrOrStderr()
+			return copyCommand.Execute(args)
+		},
+	}
+	copyCommand.Register(cmd)
 	return cmd
 }

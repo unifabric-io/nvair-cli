@@ -110,9 +110,51 @@ func TestGetSimulations_JSONResultsOnly(t *testing.T) {
 	}
 }
 
-func TestGetNodes_RequiresSimulation(t *testing.T) {
-	_, err := executeGet(t, []string{"nodes", "-o", "json"}, "https://air.nvidia.com/api")
-	if err == nil || !strings.Contains(err.Error(), "--simulation <name> is required") {
+func TestGetNodes_AutoSelectSingleSimulation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v2/simulations":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
+		case "/v2/simulations/nodes/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"node-1","name":"leaf-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.10\"}","os":"img-ubuntu","simulation":"sim-1"}]}`))
+		case "/v2/images":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"img-ubuntu","name":"generic-ubuntu"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	stdout, stderr, err := executeGetWithIO(t, []string{"nodes", "-o", "json"}, server.URL)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	if !strings.Contains(stdout, "\"name\": \"leaf-1\"") {
+		t.Fatalf("expected node output, got: %q", stdout)
+	}
+	if !strings.Contains(stderr, `Using simulation "lab-a" by default.`) {
+		t.Fatalf("expected auto-selected simulation notice, got stderr=%q", stderr)
+	}
+}
+
+func TestGetNodes_RequiresSimulationWhenMultipleExist(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/simulations" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":2,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"},{"id":"sim-2","title":"lab-b","state":"RUNNING"}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	_, err := executeGet(t, []string{"nodes", "-o", "json"}, server.URL)
+	if err == nil || !strings.Contains(err.Error(), "--simulation <name> is required (2 simulations found)") {
 		t.Fatalf("expected missing simulation validation error, got: %v", err)
 	}
 }
@@ -242,7 +284,136 @@ func TestAliasesEquivalentForSimulationsJSON(t *testing.T) {
 	}
 }
 
+func TestGetForward_DefaultOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v2/simulations":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
+		case "/v1/service":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"id":"svc-1","name":"forward-22->oob-mgmt-server:22","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"},
+				{"id":"svc-2","name":"forward-20000->node-gpu-1:22","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
+			]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	stdout, stderr, err := executeGetWithIO(t, []string{"forward"}, server.URL)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	if !strings.Contains(stdout, "NAME") || !strings.Contains(stdout, "EXTERNAL") || !strings.Contains(stdout, "TARGET") {
+		t.Fatalf("expected table header in output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "forward-22->oob-mgmt-server:22") {
+		t.Fatalf("expected ssh forward row, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "oob-mgmt-server:22") {
+		t.Fatalf("expected bastion destination in output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "node-gpu-1:22") {
+		t.Fatalf("expected parsed target host:port in output, got: %q", stdout)
+	}
+	if !strings.Contains(stderr, `Using simulation "lab-a" by default.`) {
+		t.Fatalf("expected auto-selected simulation notice, got stderr=%q", stderr)
+	}
+}
+
+func TestGetForward_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v2/simulations":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
+		case "/v1/service":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"id":"svc-1","name":"forward-22->oob-mgmt-server:22","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"},
+				{"id":"svc-2","name":"forward-20000->node-gpu-1:22","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
+			]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	out, err := executeGet(t, []string{"forward", "-o", "json"}, server.URL)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	var forwards []map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &forwards); err != nil {
+		t.Fatalf("output is not json array: %v; output=%q", err, out)
+	}
+	if len(forwards) != 2 {
+		t.Fatalf("expected 2 forwards, got %d", len(forwards))
+	}
+	if forwards[0]["name"] != "forward-20000->node-gpu-1:22" {
+		t.Fatalf("expected sorted first forward by name, got: %v", forwards[0]["name"])
+	}
+	if forwards[0]["target_host"] != "node-gpu-1" {
+		t.Fatalf("expected parsed target host, got: %v", forwards[0]["target_host"])
+	}
+	if forwards[0]["target_port"] != float64(22) {
+		t.Fatalf("expected parsed target port, got: %v", forwards[0]["target_port"])
+	}
+	if forwards[1]["address"] != "ssh://ubuntu@worker01.air.nvidia.com:16821" {
+		t.Fatalf("expected ssh link address, got: %v", forwards[1]["address"])
+	}
+}
+
+func TestGetForward_YAMLOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v2/simulations":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
+		case "/v1/service":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"id":"svc-1","name":"forward-20000->node-gpu-1:22","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
+			]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	out, err := executeGet(t, []string{"forwards", "-o", "yaml"}, server.URL)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	if !strings.Contains(out, "- id: svc-1") {
+		t.Fatalf("expected forward in yaml output, got: %q", out)
+	}
+	if !strings.Contains(out, "address: worker01.air.nvidia.com:17922") {
+		t.Fatalf("expected resolved address in yaml output, got: %q", out)
+	}
+	if !strings.Contains(out, "target_host: node-gpu-1") {
+		t.Fatalf("expected parsed target host in yaml output, got: %q", out)
+	}
+	if !strings.Contains(out, "target_port: 22") {
+		t.Fatalf("expected parsed target port in yaml output, got: %q", out)
+	}
+}
+
 func executeGet(t *testing.T, args []string, endpoint string) (string, error) {
+	t.Helper()
+	stdout, _, err := executeGetWithIO(t, args, endpoint)
+	return stdout, err
+}
+
+func executeGetWithIO(t *testing.T, args []string, endpoint string) (string, string, error) {
 	t.Helper()
 	gc := NewCommand()
 	gc.APIEndpoint = endpoint
@@ -251,12 +422,13 @@ func executeGet(t *testing.T, args []string, endpoint string) (string, error) {
 	gc.Register(cmd)
 	cmd.SetArgs(args)
 
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
 
 	err := cmd.Execute()
-	return out.String(), err
+	return stdout.String(), stderr.String(), err
 }
 
 func setupConfig(t *testing.T, endpoint, bearer string, expiresAt time.Time) {

@@ -2,9 +2,12 @@ package create
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -171,7 +174,7 @@ func applySwitchConfigs(switchNodes []api.Node, bastionAddr, keyPath string) err
 			}
 
 			cmd := fmt.Sprintf("nv config replace %s && nv config apply -y", constant.SwitchConfigRemotePath)
-			res, err := bastion.ExecCommandViaBastion(bastion.BastionExecConfig{
+			execCfg := bastion.BastionExecConfig{
 				BastionUser: constant.DefaultUbuntuUser,
 				BastionAddr: bastionAddr,
 				BastionKey:  keyPath,
@@ -182,7 +185,8 @@ func applySwitchConfigs(switchNodes []api.Node, bastionAddr, keyPath string) err
 				// switch configuration file (examples/simple/switch-gpu-leaf1.yaml).
 				TargetPass: constant.DefaultCumulusNewPassword,
 				Command:    cmd,
-			})
+			}
+			res, err := execSwitchApplyWithRetry(execCfg, n.Name)
 			if err != nil {
 				logging.Verbose("Failed to apply config on switch %s: %v", n.Name, err)
 				errCh <- fmt.Errorf("apply config on switch %s failed: %w", n.Name, err)
@@ -206,4 +210,45 @@ func applySwitchConfigs(switchNodes []api.Node, bastionAddr, keyPath string) err
 
 	logging.Info("✓ Switch configs applied.")
 	return nil
+}
+
+func execSwitchApplyWithRetry(cfg bastion.BastionExecConfig, switchName string) (*bastion.ExecResult, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+		}
+
+		res, err := bastion.ExecCommandViaBastion(cfg)
+		if err == nil {
+			return res, nil
+		}
+
+		lastErr = err
+		if !shouldRetrySwitchApply(err) {
+			return nil, err
+		}
+
+		logging.Verbose("Retrying apply config on switch %s after transient error (attempt %d/3): %v", switchName, attempt+1, err)
+		time.Sleep(time.Second)
+	}
+	return nil, lastErr
+}
+
+func shouldRetrySwitchApply(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return netErr.Timeout() || netErr.Temporary()
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "ssh dial failed") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "connect failed") ||
+		strings.Contains(msg, "handshake failed") ||
+		strings.Contains(msg, "connection timed out")
 }
