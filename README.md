@@ -49,12 +49,12 @@ nvair cli binaries are available on our [releases page](https://github.com/unifa
 ```bash
 VERSION=$(curl -s https://api.github.com/repos/unifabric-io/nvair-cli/releases/latest | grep tag_name | cut -d '"' -f4)
 [ $(uname -m) = x86_64 ] && \
-curl -Lo nvcli.tar.gz https://github.com/unifabric-io/nvair-cli/releases/download/${VERSION}/nvcli_${VERSION}_linux_amd64.tar.gz
+curl -Lo nvair.tar.gz https://github.com/unifabric-io/nvair-cli/releases/download/${VERSION}/nvair_${VERSION}_linux_amd64.tar.gz
 [ $(uname -m) = aarch64 ] && \
-curl -Lo nvcli.tar.gz https://github.com/unifabric-io/nvair-cli/releases/download/${VERSION}/nvcli_${VERSION}_linux_arm64.tar.gz
-tar -xzf nvcli.tar.gz
-chmod +x ./nvcli
-sudo mv ./nvcli /usr/local/bin/nvcli
+curl -Lo nvair.tar.gz https://github.com/unifabric-io/nvair-cli/releases/download/${VERSION}/nvair_${VERSION}_linux_arm64.tar.gz
+tar -xzf nvair.tar.gz
+chmod +x ./nvair
+sudo mv ./nvair /usr/local/bin/nvair
 ```
 
 ### On macOS
@@ -62,21 +62,21 @@ sudo mv ./nvcli /usr/local/bin/nvcli
 ```bash
 VERSION=$(curl -s https://api.github.com/repos/unifabric-io/nvair-cli/releases/latest | grep tag_name | cut -d '"' -f4)
 [ $(uname -m) = x86_64 ] && \
-curl -Lo nvcli.tar.gz https://github.com/unifabric-io/nvair-cli/releases/download/${VERSION}/nvcli_${VERSION}_darwin_amd64.tar.gz
+curl -Lo nvair.tar.gz https://github.com/unifabric-io/nvair-cli/releases/download/${VERSION}/nvair_${VERSION}_darwin_amd64.tar.gz
 [ $(uname -m) = arm64 ] && \
-curl -Lo nvcli.tar.gz https://github.com/unifabric-io/nvair-cli/releases/download/${VERSION}/nvcli_${VERSION}_darwin_arm64.tar.gz
-tar -xzf nvcli.tar.gz
-chmod +x ./nvcli
-mv ./nvcli /usr/local/bin/nvcli
+curl -Lo nvair.tar.gz https://github.com/unifabric-io/nvair-cli/releases/download/${VERSION}/nvair_${VERSION}_darwin_arm64.tar.gz
+tar -xzf nvair.tar.gz
+chmod +x ./nvair
+mv ./nvair /usr/local/bin/nvair
 ```
 
 ### On Windows (PowerShell)
 
 ```powershell
 $version = (Invoke-RestMethod https://api.github.com/repos/unifabric-io/nvair-cli/releases/latest).tag_name
-curl.exe -Lo nvcli.zip https://github.com/unifabric-io/nvair-cli/releases/download/$version/nvcli_${version}_windows_amd64.zip
-Expand-Archive nvcli.zip -Force
-Move-Item .\nvcli.exe C:\some-dir-in-your-PATH\nvcli.exe
+curl.exe -Lo nvair.zip https://github.com/unifabric-io/nvair-cli/releases/download/$version/nvair_${version}_windows_amd64.zip
+Expand-Archive nvair.zip -Force
+Move-Item .\nvair.exe C:\some-dir-in-your-PATH\nvair.exe
 ```
 
 ## Usage Examples
@@ -152,16 +152,16 @@ When you need to expose internal UI components of the cluster externally, direct
 
 ```log
 # The example maps port 6443 on gpu-node-1 to an externally accessible address (worker04.air.nvidia.com:22978).
-$ nvair add forward --target-host gpu-node-1 --target-port 6443
+$ nvair add forward --target-node gpu-node-1 --target-port 6443
 ✓ Forward service created successfully.
     worker04.air.nvidia.com:22978 -> gpu-node-1:6443
 
 # List port forward rules in a simulation
 $ nvair get forward
 Using simulation "simple" by default. Use -s/--simulation <name> to specify a different simulation.
-NAME                          EXTERNAL                       DESTINATION
-forward->gpu-node-1:6443      worker04.air.nvidia.com:21676  gpu-node-1:6443
-forward->oob-mgmt-server:22   worker04.air.nvidia.com:27176  oob-mgmt-server:22
+NAME                            EXTERNAL                       TARGET              TYPE
+forward-20000->gpu-node-1:6443  worker04.air.nvidia.com:21676  gpu-node-1:6443     other
+forward-22->oob-mgmt-server:22  worker04.air.nvidia.com:27176  oob-mgmt-server:22  ssh
 ```
 > The source port `22978` is randomly assigned by the NVIDIA Air platform and cannot be specified.
 

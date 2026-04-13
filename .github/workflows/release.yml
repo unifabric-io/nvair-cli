@@ -66,13 +66,13 @@ jobs:
           CGO_ENABLED: 0
         run: |
           TAG_NAME="${GITHUB_REF_NAME}"
-          BINARY_NAME="nvcli${{ matrix.ext }}"
-          ARCHIVE_NAME="nvcli_${TAG_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          BINARY_NAME="nvair${{ matrix.ext }}"
+          ARCHIVE_NAME="nvair_${TAG_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
           OUTPUT_DIR="dist/build/${{ matrix.goos }}-${{ matrix.goarch }}"
 
           mkdir -p "$OUTPUT_DIR"
 
-          go build -o "$OUTPUT_DIR/$BINARY_NAME" ./cmd/nvcli
+          go build -o "$OUTPUT_DIR/$BINARY_NAME" ./cmd/nvair
 
           if [ "${{ matrix.archive }}" = "zip" ]; then
             zip "dist/${ARCHIVE_NAME}.zip" -j "$OUTPUT_DIR/$BINARY_NAME"
@@ -83,8 +83,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nvcli-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/nvcli_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.*
+          name: nvair-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/nvair_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.*
           if-no-files-found: error
 
   release:
@@ -106,7 +106,7 @@ jobs:
         run: |
           cd dist
           shopt -s nullglob
-          files=(nvcli_*.tar.gz nvcli_*.zip)
+          files=(nvair_*.tar.gz nvair_*.zip)
           if [ ${#files[@]} -eq 0 ]; then
             echo "No release archives found to checksum" >&2
             exit 1
@@ -122,7 +122,7 @@ jobs:
           name: Release ${{ github.ref_name }}
           body_path: dist/release-notes.md
           files: |
-            dist/nvcli_*.tar.gz
-            dist/nvcli_*.zip
+            dist/nvair_*.tar.gz
+            dist/nvair_*.zip
             dist/sha256sums.txt
             dist/release-notes.md
