@@ -8,6 +8,8 @@ Commands:
   login                            Authenticate with NVIDIA Air platform
       -u, --username <string>      Username (email) for authentication
       -p, --password <string>      API token for authentication (get from https://air.nvidia.com/settings)
+
+  status                           Show current login and connectivity status
       
   create                           Create a simulation from topology directory
       -d, -

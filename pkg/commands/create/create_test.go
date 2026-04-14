@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/unifabric-io/nvair-cli/pkg/api"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
 	"github.com/unifabric-io/nvair-cli/pkg/topology"
@@ -41,6 +43,21 @@ func TestCreateCommand_NoDirectoryFlag(t *testing.T) {
 
 	if err := createCmd.Execute(); err == nil {
 		t.Fatalf("Expected error for missing directory flag, got nil")
+	}
+}
+
+func TestCreateCommand_DoesNotAcceptAPIEndpointFlag(t *testing.T) {
+	createCmd := NewCommand()
+	cmd := &cobra.Command{Use: "create", SilenceErrors: true, SilenceUsage: true}
+	createCmd.Register(cmd)
+	cmd.SetArgs([]string{"--api-endpoint", "https://example.com/api"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected unknown flag error")
+	}
+	if !strings.Contains(err.Error(), "unknown flag: --api-endpoint") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

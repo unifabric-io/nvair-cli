@@ -41,13 +41,12 @@ type Command struct {
 
 // NewCommand creates a new delete command instance.
 func NewCommand() *Command {
-	return &Command{APIEndpoint: "https://air.nvidia.com/api"}
+	return &Command{APIEndpoint: constant.DefaultAPIEndpoint}
 }
 
 // Register registers the delete command flags.
 func (dc *Command) Register(cmd *cobra.Command) {
-	flags := cmd.Flags()
-	flags.StringVar(&dc.APIEndpoint, "api-endpoint", dc.APIEndpoint, "API endpoint URL")
+	_ = cmd
 }
 
 // ValidateArgs validates positional arguments for the delete command.
@@ -108,6 +107,8 @@ func (dc *Command) Execute() error {
 	}
 	logging.Verbose("Authentication verified")
 
+	endpoint := config.ResolveAPIEndpoint(cfg, dc.APIEndpoint)
+
 	logging.Verbose("Checking token expiration")
 	if cfg.IsTokenExpired(time.Now()) {
 		logging.Verbose("Bearer token has expired, attempting to refresh with saved API token")
@@ -117,7 +118,7 @@ func (dc *Command) Execute() error {
 			return fmt.Errorf("authentication token has expired and no API token available. Please run 'nvair login' again")
 		}
 
-		apiClient := api.NewClient(dc.APIEndpoint, "")
+		apiClient := api.NewClient(endpoint, "")
 		newBearerToken, expiresAt, err := apiClient.AuthLogin(cfg.Username, cfg.APIToken)
 		if err != nil {
 			logging.Verbose("Failed to refresh token: %v", err)
@@ -133,7 +134,7 @@ func (dc *Command) Execute() error {
 		}
 	}
 
-	apiClient := api.NewClient(dc.APIEndpoint, cfg.BearerToken)
+	apiClient := api.NewClient(endpoint, cfg.BearerToken)
 
 	var deleteErr error
 	switch dc.ResourceType {

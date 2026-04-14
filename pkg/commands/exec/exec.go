@@ -52,7 +52,7 @@ type resolvedCredentials struct {
 // NewCommand creates a new exec command with defaults.
 func NewCommand() *Command {
 	return &Command{
-		APIEndpoint: "https://air.nvidia.com/api",
+		APIEndpoint: constant.DefaultAPIEndpoint,
 	}
 }
 
@@ -60,7 +60,6 @@ func NewCommand() *Command {
 func (ec *Command) Register(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	flags.StringVarP(&ec.SimulationName, "simulation", "s", ec.SimulationName, "Simulation name (optional when only one simulation exists)")
-	flags.StringVar(&ec.APIEndpoint, "api-endpoint", ec.APIEndpoint, "API endpoint URL")
 	flags.BoolVarP(&ec.Stdin, "stdin", "i", ec.Stdin, "Keep stdin open for interactive session")
 	flags.BoolVarP(&ec.TTY, "tty", "t", ec.TTY, "Allocate a TTY for interactive session")
 }
@@ -211,12 +210,14 @@ func (ec *Command) ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *
 		return nil, nil, fmt.Errorf("not authenticated. Please run 'nvair login' first")
 	}
 
+	endpoint := config.ResolveAPIEndpoint(cfg, apiEndpoint)
+
 	if cfg.IsTokenExpired(time.Now()) {
 		if cfg.APIToken == "" {
 			return nil, nil, fmt.Errorf("authentication token has expired and no API token available. Please run 'nvair login' again")
 		}
 
-		refreshClient := api.NewClient(apiEndpoint, "")
+		refreshClient := api.NewClient(endpoint, "")
 		newBearerToken, expiresAt, err := refreshClient.AuthLogin(cfg.Username, cfg.APIToken)
 		if err != nil {
 			return nil, nil, fmt.Errorf("authentication token expired and refresh failed: %w", err)
@@ -230,7 +231,7 @@ func (ec *Command) ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *
 		}
 	}
 
-	return api.NewClient(apiEndpoint, cfg.BearerToken), cfg, nil
+	return api.NewClient(endpoint, cfg.BearerToken), cfg, nil
 }
 
 func (ec *Command) errWriter() io.Writer {

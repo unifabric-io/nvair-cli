@@ -26,7 +26,7 @@ type Command struct {
 // NewCommand creates a new print-ssh-command command.
 func NewCommand() *Command {
 	return &Command{
-		APIEndpoint: "https://air.nvidia.com/api",
+		APIEndpoint: constant.DefaultAPIEndpoint,
 	}
 }
 
@@ -34,7 +34,6 @@ func NewCommand() *Command {
 func (pc *Command) Register(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	flags.StringVarP(&pc.SimulationName, "simulation", "s", pc.SimulationName, "Simulation name (optional when only one simulation exists)")
-	flags.StringVar(&pc.APIEndpoint, "api-endpoint", pc.APIEndpoint, "API endpoint URL")
 }
 
 // Execute runs the print-ssh-command command.
@@ -82,12 +81,14 @@ func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config,
 		return nil, nil, fmt.Errorf("not authenticated. Please run 'nvair login' first")
 	}
 
+	endpoint := config.ResolveAPIEndpoint(cfg, apiEndpoint)
+
 	if cfg.IsTokenExpired(time.Now()) {
 		if cfg.APIToken == "" {
 			return nil, nil, fmt.Errorf("authentication token has expired and no API token available. Please run 'nvair login' again")
 		}
 
-		refreshClient := api.NewClient(apiEndpoint, "")
+		refreshClient := api.NewClient(endpoint, "")
 		newBearerToken, expiresAt, err := refreshClient.AuthLogin(cfg.Username, cfg.APIToken)
 		if err != nil {
 			return nil, nil, fmt.Errorf("authentication token expired and refresh failed: %w", err)
@@ -101,7 +102,7 @@ func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config,
 		}
 	}
 
-	return api.NewClient(apiEndpoint, cfg.BearerToken), cfg, nil
+	return api.NewClient(endpoint, cfg.BearerToken), cfg, nil
 }
 
 func (pc *Command) findSSHService(apiClient *api.Client, simulationID string) (string, int, error) {

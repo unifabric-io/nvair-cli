@@ -23,6 +23,10 @@ func TestRegister_ForwardRequiresNameAndExposesTargetNodeAndTargetPortOnly(t *te
 	cmd := &cobra.Command{Use: "add", SilenceErrors: true, SilenceUsage: true}
 	ac.Register(cmd)
 
+	if flag := cmd.PersistentFlags().Lookup("api-endpoint"); flag != nil {
+		t.Fatalf("did not expect api-endpoint flag to be registered")
+	}
+
 	forwardCmd, _, err := cmd.Find([]string{"forward"})
 	if err != nil {
 		t.Fatalf("find forward command: %v", err)

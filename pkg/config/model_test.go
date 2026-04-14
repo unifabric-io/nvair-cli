@@ -210,3 +210,28 @@ func TestSaveCreatesDirectory(t *testing.T) {
 		t.Errorf("Config directory was not created: %v", err)
 	}
 }
+
+func TestResolveAPIEndpoint(t *testing.T) {
+	t.Run("uses configured endpoint first", func(t *testing.T) {
+		cfg := &Config{APIEndpoint: "https://example.com/api"}
+		got := ResolveAPIEndpoint(cfg, "https://fallback.example/api")
+		if got != "https://example.com/api" {
+			t.Fatalf("ResolveAPIEndpoint() = %q, want configured endpoint", got)
+		}
+	})
+
+	t.Run("falls back when config endpoint is empty", func(t *testing.T) {
+		cfg := &Config{APIEndpoint: "   "}
+		got := ResolveAPIEndpoint(cfg, "https://fallback.example/api")
+		if got != "https://fallback.example/api" {
+			t.Fatalf("ResolveAPIEndpoint() = %q, want fallback endpoint", got)
+		}
+	})
+
+	t.Run("uses project default when both are empty", func(t *testing.T) {
+		got := ResolveAPIEndpoint(nil, "")
+		if got != constant.DefaultAPIEndpoint {
+			t.Fatalf("ResolveAPIEndpoint() = %q, want %q", got, constant.DefaultAPIEndpoint)
+		}
+	})
+}

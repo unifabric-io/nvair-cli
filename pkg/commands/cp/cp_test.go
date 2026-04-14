@@ -95,6 +95,9 @@ func TestRegister_SimulationFlagOptional(t *testing.T) {
 		},
 	}
 	cc.Register(cmd)
+	if flag := cmd.Flags().Lookup("api-endpoint"); flag != nil {
+		t.Fatalf("did not expect api-endpoint flag to be registered")
+	}
 	cmd.SetArgs([]string{"node-gpu-1:/tmp/a.txt", "/tmp/a.txt"})
 
 	err := cmd.Execute()
