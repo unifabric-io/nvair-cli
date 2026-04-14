@@ -18,6 +18,8 @@ func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config,
 	}
 	logging.Verbose("Authentication verified")
 
+	endpoint := config.ResolveAPIEndpoint(cfg, apiEndpoint)
+
 	logging.Verbose("Checking token expiration")
 	if cfg.IsTokenExpired(time.Now()) {
 		logging.Verbose("Bearer token has expired, attempting to refresh with saved API token")
@@ -27,7 +29,7 @@ func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config,
 			return nil, nil, fmt.Errorf("authentication token has expired and no API token available. Please run 'nvair login' again")
 		}
 
-		apiClient := api.NewClient(apiEndpoint, "")
+		apiClient := api.NewClient(endpoint, "")
 		newBearerToken, expiresAt, err := apiClient.AuthLogin(cfg.Username, cfg.APIToken)
 		if err != nil {
 			logging.Verbose("Failed to refresh token: %v", err)
@@ -44,6 +46,6 @@ func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config,
 	}
 	logging.Verbose("Token is valid")
 
-	apiClient := api.NewClient(apiEndpoint, cfg.BearerToken)
+	apiClient := api.NewClient(endpoint, cfg.BearerToken)
 	return apiClient, cfg, nil
 }

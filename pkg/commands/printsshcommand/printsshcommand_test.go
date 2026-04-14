@@ -71,6 +71,18 @@ func TestPrintSSHCommand_RequiresSimulationWhenMultipleExist(t *testing.T) {
 	}
 }
 
+func TestPrintSSHCommand_DoesNotAcceptAPIEndpointFlag(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	_, _, err := executePrintSSHCommandWithIO(t, []string{"--api-endpoint", "https://example.com/api"}, "https://air.nvidia.com/api")
+	if err == nil {
+		t.Fatalf("expected unknown flag error")
+	}
+	if !strings.Contains(err.Error(), "unknown flag: --api-endpoint") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func executePrintSSHCommand(t *testing.T, args []string, endpoint string) (string, error) {
 	t.Helper()
 	stdout, _, err := executePrintSSHCommandWithIO(t, args, endpoint)

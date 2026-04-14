@@ -66,6 +66,18 @@ func TestExtractMgmtIP(t *testing.T) {
 	}
 }
 
+func TestGetCommand_DoesNotAcceptAPIEndpointFlag(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	_, _, err := executeGetWithIO(t, []string{"--api-endpoint", "https://example.com/api", "simulations"}, "https://air.nvidia.com/api")
+	if err == nil {
+		t.Fatalf("expected unknown flag error")
+	}
+	if !strings.Contains(err.Error(), "unknown flag: --api-endpoint") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestGetSimulations_JSONResultsOnly(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

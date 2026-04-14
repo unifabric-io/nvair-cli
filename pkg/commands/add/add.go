@@ -44,14 +44,12 @@ type Command struct {
 // NewCommand creates a new add command with defaults.
 func NewCommand() *Command {
 	return &Command{
-		APIEndpoint: "https://air.nvidia.com/api",
+		APIEndpoint: constant.DefaultAPIEndpoint,
 	}
 }
 
 // Register registers add subcommands and flags.
 func (ac *Command) Register(cmd *cobra.Command) {
-	cmd.PersistentFlags().StringVar(&ac.APIEndpoint, "api-endpoint", ac.APIEndpoint, "API endpoint URL")
-
 	forwardCmd := &cobra.Command{
 		Use:     "forward <forward-name>",
 		Aliases: []string{"forwards"},
@@ -353,12 +351,14 @@ func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config,
 		return nil, nil, fmt.Errorf("not authenticated. Please run 'nvair login' first")
 	}
 
+	endpoint := config.ResolveAPIEndpoint(cfg, apiEndpoint)
+
 	if cfg.IsTokenExpired(time.Now()) {
 		if cfg.APIToken == "" {
 			return nil, nil, fmt.Errorf("authentication token has expired and no API token available. Please run 'nvair login' again")
 		}
 
-		refreshClient := api.NewClient(apiEndpoint, "")
+		refreshClient := api.NewClient(endpoint, "")
 		newBearerToken, expiresAt, err := refreshClient.AuthLogin(cfg.Username, cfg.APIToken)
 		if err != nil {
 			return nil, nil, fmt.Errorf("authentication token expired and refresh failed: %w", err)
@@ -372,7 +372,7 @@ func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config,
 		}
 	}
 
-	return api.NewClient(apiEndpoint, cfg.BearerToken), cfg, nil
+	return api.NewClient(endpoint, cfg.BearerToken), cfg, nil
 }
 
 // setupIPTables SSHes into oob-mgmt-server and configures DNAT + MASQUERADE rules

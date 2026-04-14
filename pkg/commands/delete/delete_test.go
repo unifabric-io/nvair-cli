@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/unifabric-io/nvair-cli/pkg/bastion"
+
 	"github.com/unifabric-io/nvair-cli/pkg/config"
 )
 

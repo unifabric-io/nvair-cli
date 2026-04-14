@@ -9,6 +9,7 @@ import (
 
 	"github.com/unifabric-io/nvair-cli/pkg/api"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
+	"github.com/unifabric-io/nvair-cli/pkg/constant"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
 	"github.com/unifabric-io/nvair-cli/pkg/output"
 	"github.com/unifabric-io/nvair-cli/pkg/ssh"
@@ -26,7 +27,7 @@ type Command struct {
 // NewCommand creates a new login command.
 func NewCommand() *Command {
 	return &Command{
-		APIEndpoint: "https://air.nvidia.com/api",
+		APIEndpoint: constant.DefaultAPIEndpoint,
 		KeyName:     "nvair-cli",
 	}
 }

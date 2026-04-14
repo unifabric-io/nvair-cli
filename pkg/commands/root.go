@@ -15,6 +15,7 @@ import (
 	logincmd "github.com/unifabric-io/nvair-cli/pkg/commands/login"
 	logoutcmd "github.com/unifabric-io/nvair-cli/pkg/commands/logout"
 	printsshcommandcmd "github.com/unifabric-io/nvair-cli/pkg/commands/printsshcommand"
+	statuscmd "github.com/unifabric-io/nvair-cli/pkg/commands/status"
 	"github.com/unifabric-io/nvair-cli/pkg/output"
 )
 
@@ -64,6 +65,7 @@ func (rc *RootCommand) newCommand() *cobra.Command {
 	rootCmd.AddCommand(
 		rc.newLoginCommand(),
 		rc.newLogoutCommand(),
+		rc.newStatusCommand(),
 		rc.newAddCommand(),
 		rc.newCreateCommand(),
 		rc.newGetCommand(),
@@ -105,6 +107,23 @@ func (rc *RootCommand) newLogoutCommand() *cobra.Command {
 		},
 	}
 	logoutCmd.Register(cmd)
+	return cmd
+}
+
+func (rc *RootCommand) newStatusCommand() *cobra.Command {
+	statusCommand := statuscmd.NewCommand()
+	cmd := &cobra.Command{
+		Use:           "status",
+		Short:         "Show current login and connectivity status",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			statusCommand.Verbose = rc.Verbose
+			return statusCommand.Execute(cmd)
+		},
+	}
+	statusCommand.Register(cmd)
 	return cmd
 }
 
