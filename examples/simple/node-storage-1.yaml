@@ -4,25 +4,25 @@ network:
   ethernets:
     eth1:
       addresses:
-        - "172.17.9.101/24"
+        - "172.20.1.101/24"
       mtu: 4200
       routes:
         - to: 0.0.0.0/0
-          via: 172.17.9.1
+          via: 172.20.1.1
           table: 101
       routing-policy:
-        - from: 172.17.9.101
+        - from: 172.20.1.101
           table: 101
           priority: 31761
     eth2:
       addresses:
-        - "172.17.9.102/24"
+        - "172.20.1.102/24"
       mtu: 4200
       routes:
         - to: 0.0.0.0/0
-          via: 172.17.9.1
+          via: 172.20.1.1
           table: 102
       routing-policy:
-        - from: 172.17.9.102
+        - from: 172.20.1.102
           table: 102
           priority: 31762

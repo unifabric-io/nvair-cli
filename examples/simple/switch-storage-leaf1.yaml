@@ -27,7 +27,7 @@
       vlan90:
         ipv4:
           address:
-            172.17.9.1/24: {}
+            172.20.1.1/24: {}
         type: svi
         vlan: 90
     system:
