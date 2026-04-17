@@ -100,13 +100,13 @@ network:
           priority: 31768
     eth9:
       addresses:
-        - "172.17.9.13/24"
+        - "172.20.1.13/24"
       mtu: 4200
       routes:
         - to: 0.0.0.0/0
-          via: 172.17.9.1
+          via: 172.20.1.1
           table: 109
       routing-policy:
-        - from: 172.17.9.13
+        - from: 172.20.1.13
           table: 109
           priority: 31769
