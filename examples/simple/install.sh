@@ -153,9 +153,11 @@ fi
 
 step "PHASE 1/7 — Create Simulation"
 log "Creating simulation from ${TOPOLOGY_DIR} (delete-if-exists=${DELETE_IF_EXISTS})..."
+log "[CMD] ${NVAIR_BIN} create ${CREATE_ARGS[*]}"
 "${NVAIR_BIN}" create "${CREATE_ARGS[@]}"
 
 log "Discovering GPU nodes..."
+log "[CMD] ${NVAIR_BIN} get nodes ${SIM_ARGS[*]}"
 mapfile -t GPU_NODES < <(
   "${NVAIR_BIN}" get nodes "${SIM_ARGS[@]}" \
     | awk 'NR>1 && ($1 ~ /^node-gpu-/ || $1 ~ /^gpu-node-/) { print $1 }' \
@@ -330,6 +332,7 @@ rm -rf inventory/nvair
 cp -rfp inventory/sample inventory/nvair
 mkdir -p inventory/nvair/group_vars/k8s_cluster"
 
+log "[CMD] ${NVAIR_BIN} cp ${SIM_ARGS[*]} ${HOSTS_FILE} ${BOOTSTRAP_NODE}:${KUBESPRAY_DIR}/inventory/nvair/hosts.yaml"
 "${NVAIR_BIN}" cp "${SIM_ARGS[@]}" "${HOSTS_FILE}" "${BOOTSTRAP_NODE}:${KUBESPRAY_DIR}/inventory/nvair/hosts.yaml"
 rm -f "${HOSTS_FILE}"
 
@@ -357,9 +360,11 @@ sudo chown \"\$(id -u):\$(id -g)\" \"\$HOME/.kube/config\""
 
 step "PHASE 7/7 — Expose Kubernetes API"
 log "Ensuring forward for Kubernetes API (${BOOTSTRAP_NODE}:6443)..."
+log "[CMD] ${NVAIR_BIN} add forward ${SIM_ARGS[*]} --target-node ${BOOTSTRAP_NODE} --target-port 6443"
 "${NVAIR_BIN}" add forward "${SIM_ARGS[@]}" --target-node "${BOOTSTRAP_NODE}" --target-port 6443
 
 log "Resolving external forward address for ${BOOTSTRAP_NODE}:6443..."
+log "[CMD] ${NVAIR_BIN} get forward ${SIM_ARGS[*]}"
 FORWARD_HOSTPORT="$("${NVAIR_BIN}" get forward "${SIM_ARGS[@]}" | awk 'NR>1 && $3 ~ /:6443$/ { print $2; exit }')"
 if [[ -z "${FORWARD_HOSTPORT}" ]]; then
   echo "Failed to resolve forward address for ${BOOTSTRAP_NODE}:6443." >&2
@@ -381,6 +386,7 @@ yq -i '.clusters[].cluster.insecure-skip-tls-verify = true' \"\${REMOTE_EXTERNAL
 yq -i \".clusters[].cluster.server = \\\"https://\${FORWARD_HOSTPORT}\\\"\" \"\${REMOTE_EXTERNAL_KUBECONFIG}\""
 
 log "Exporting external kubeconfig to local file: ${KUBECONFIG_FORWARD_OUT}"
+log "[CMD] ${NVAIR_BIN} cp ${SIM_ARGS[*]} ${BOOTSTRAP_NODE}:${REMOTE_EXTERNAL_KUBECONFIG} ${KUBECONFIG_FORWARD_OUT}"
 "${NVAIR_BIN}" cp "${SIM_ARGS[@]}" "${BOOTSTRAP_NODE}:${REMOTE_EXTERNAL_KUBECONFIG}" "${KUBECONFIG_FORWARD_OUT}"
 
 log "Done."
