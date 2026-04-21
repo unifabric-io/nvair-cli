@@ -156,14 +156,14 @@ func TestExecute_InteractiveModeWithCommandUsesInteractiveCommandRunner(t *testi
 			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{
 					"id":           "svc-custom",
-					"name":         "forward-20000->node-gpu-1:22",
+					"name":         "gpu-ssh",
 					"service_type": "other",
 					"host":         "worker01.air.nvidia.com",
 					"src_port":     17922,
 				},
 				{
 					"id":           "svc-1",
-					"name":         "forward-22->oob-mgmt-server:22",
+					"name":         "bastion-ssh",
 					"service_type": "ssh",
 					"host":         "worker01.air.nvidia.com",
 					"src_port":     10022,
@@ -264,7 +264,7 @@ func TestExecute_InteractiveModeWithoutCommandUsesShellRunner(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{
 					"id":           "svc-1",
-					"name":         "forward-22->oob-mgmt-server:22",
+					"name":         "bastion-ssh",
 					"service_type": "ssh",
 					"host":         "worker01.air.nvidia.com",
 					"src_port":     10022,
@@ -360,7 +360,7 @@ func TestExecute_NodeNotFoundIncludesAvailableNodes(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{
 					"id":           "svc-1",
-					"name":         "forward-22->oob-mgmt-server:22",
+					"name":         "bastion-ssh",
 					"service_type": "ssh",
 					"host":         "worker01.air.nvidia.com",
 					"src_port":     10022,

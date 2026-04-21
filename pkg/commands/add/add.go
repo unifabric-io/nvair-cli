@@ -34,6 +34,7 @@ const autoForwardListenPortStart = 20000
 type Command struct {
 	APIEndpoint    string
 	SimulationName string
+	ForwardName    string
 	TargetPort     int
 	TargetNode     string
 	Stderr         io.Writer
@@ -52,11 +53,14 @@ func (ac *Command) Register(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&ac.APIEndpoint, "api-endpoint", ac.APIEndpoint, "API endpoint URL")
 
 	forwardCmd := &cobra.Command{
-		Use:   "forward",
-		Short: "Add a forward service in a simulation",
+		Use:     "forward <forward-name>",
+		Aliases: []string{"forwards"},
+		Short:   "Add a forward service in a simulation",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ac.Stderr = cmd.ErrOrStderr()
 			ac.SimulationName = strings.TrimSpace(ac.SimulationName)
+			ac.ForwardName = strings.TrimSpace(args[0])
 			ac.TargetNode = strings.TrimSpace(ac.TargetNode)
 			return ac.executeForward()
 		},
@@ -71,6 +75,10 @@ func (ac *Command) Register(cmd *cobra.Command) {
 func (ac *Command) executeForward() error {
 	ac.configureVerbose()
 
+	ac.ForwardName = strings.TrimSpace(ac.ForwardName)
+	if ac.ForwardName == "" {
+		return output.NewValidationError("forward name is required")
+	}
 	if ac.TargetPort <= 0 || ac.TargetPort > 65535 {
 		return output.NewValidationError("--target-port must be between 1 and 65535")
 	}
@@ -96,22 +104,12 @@ func (ac *Command) executeForward() error {
 	if err != nil {
 		return err
 	}
-	plan, err := ac.planForward(services)
+	plan, err := ac.planForward(apiClient, simulationID, services)
 	if err != nil {
 		return err
 	}
 	if plan.Existing != nil {
-		address := resolveForwardAddress(*plan.Existing)
-		logging.Info("✓ Forward already exists.")
-		logging.Info("  %s -> %s", address, net.JoinHostPort(ac.TargetNode, strconv.Itoa(ac.TargetPort)))
-		if !plan.RequiresIPTables {
-			return nil
-		}
-		logging.Info("  configuring iptables NAT")
-		if err := ac.setupIPTables(apiClient, simulationID, ac.TargetNode, plan.ListenPort, ac.TargetPort); err != nil {
-			return fmt.Errorf("iptables setup failed: %w", err)
-		}
-		return nil
+		return ac.existingForwardNameError(apiClient, simulationID, *plan.Existing)
 	}
 
 	outboundInterfaceID, err := ac.findOutboundInterfaceID(apiClient, simulationID)
@@ -119,8 +117,7 @@ func (ac *Command) executeForward() error {
 		return err
 	}
 
-	serviceName := forwardutil.BuildServiceName(plan.ListenPort, ac.TargetPort, ac.TargetNode)
-	serviceResp, err := apiClient.CreateService(simulationID, outboundInterfaceID, serviceName, plan.ListenPort, plan.ServiceType)
+	serviceResp, err := apiClient.CreateService(simulationID, outboundInterfaceID, ac.ForwardName, plan.ListenPort, plan.ServiceType)
 	if err != nil {
 		return fmt.Errorf("failed to create forward service: %w", err)
 	}
@@ -129,9 +126,6 @@ func (ac *Command) executeForward() error {
 	logging.Info("✓ Forward service created successfully.")
 	logging.Info("  %s -> %s", address, net.JoinHostPort(ac.TargetNode, strconv.Itoa(ac.TargetPort)))
 
-	if !plan.RequiresIPTables {
-		return nil
-	}
 	if err := ac.setupIPTables(apiClient, simulationID, ac.TargetNode, plan.ListenPort, ac.TargetPort); err != nil {
 		return fmt.Errorf("forward created but iptables setup failed: %w", err)
 	}
@@ -139,48 +133,15 @@ func (ac *Command) executeForward() error {
 }
 
 type forwardPlan struct {
-	Existing         *api.EnableSSHResponse
-	ListenPort       int
-	ServiceType      string
-	RequiresIPTables bool
+	Existing    *api.EnableSSHResponse
+	ListenPort  int
+	ServiceType string
 }
 
-func (ac *Command) planForward(services []api.EnableSSHResponse) (forwardPlan, error) {
-	if ac.isDirectBastionForward() {
-		for i := range services {
-			svc := &services[i]
-			if svc.DestPort != 22 {
-				continue
-			}
-			if forwardutil.IsBastionSSHServiceName(svc.Name) && strings.EqualFold(svc.ServiceType, "ssh") {
-				return forwardPlan{
-					Existing:         svc,
-					ListenPort:       22,
-					ServiceType:      "ssh",
-					RequiresIPTables: false,
-				}, nil
-			}
-
-			return forwardPlan{}, output.NewValidationError(
-				fmt.Sprintf("listen port 22 is already used by service %q. Delete that forward first using its target node and target port",
-					svc.Name),
-			)
-		}
-
-		return forwardPlan{
-			ListenPort:       22,
-			ServiceType:      "ssh",
-			RequiresIPTables: false,
-		}, nil
-	}
-
+func (ac *Command) planForward(apiClient *api.Client, simulationID string, services []api.EnableSSHResponse) (forwardPlan, error) {
 	for i := range services {
 		svc := &services[i]
-		parsed, ok := forwardutil.ParseServiceName(svc.Name)
-		if !ok {
-			continue
-		}
-		if parsed.TargetHost != ac.TargetNode || parsed.TargetPort != ac.TargetPort {
+		if svc.Name != ac.ForwardName {
 			continue
 		}
 
@@ -190,37 +151,107 @@ func (ac *Command) planForward(services []api.EnableSSHResponse) (forwardPlan, e
 		}
 
 		return forwardPlan{
-			Existing:         svc,
-			ListenPort:       svc.DestPort,
-			ServiceType:      serviceType,
-			RequiresIPTables: true,
+			Existing:    svc,
+			ListenPort:  svc.DestPort,
+			ServiceType: serviceType,
 		}, nil
 	}
 
-	listenPort, err := nextAvailableListenPort(services, autoForwardListenPortStart)
+	usedPorts, err := ac.usedForwardListenPorts(apiClient, simulationID)
+	if err != nil {
+		return forwardPlan{}, err
+	}
+
+	listenPort, err := nextAvailableListenPort(usedPorts, autoForwardListenPortStart)
 	if err != nil {
 		return forwardPlan{}, err
 	}
 
 	return forwardPlan{
-		ListenPort:       listenPort,
-		ServiceType:      "other",
-		RequiresIPTables: true,
+		ListenPort:  listenPort,
+		ServiceType: "other",
 	}, nil
 }
 
-func (ac *Command) isDirectBastionForward() bool {
-	return ac.TargetNode == constant.OOBMgmtServerName && ac.TargetPort == 22
-}
-
-func nextAvailableListenPort(services []api.EnableSSHResponse, start int) (int, error) {
-	usedPorts := make(map[int]struct{}, len(services))
-	for _, svc := range services {
-		if svc.DestPort > 0 {
-			usedPorts[svc.DestPort] = struct{}{}
-		}
+func (ac *Command) usedForwardListenPorts(apiClient *api.Client, simulationID string) (map[int]struct{}, error) {
+	usedPorts := make(map[int]struct{})
+	result, err := ac.runCommandOnBastion(apiClient, simulationID, "sudo iptables-save -t nat 2>/dev/null || sudo iptables -t nat -S")
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect iptables rules: %w", err)
+	}
+	if result != nil && result.ExitCode != 0 {
+		return nil, fmt.Errorf("failed to inspect iptables rules: exit code %d: %s", result.ExitCode, result.Stderr)
+	}
+	if result == nil {
+		return usedPorts, nil
 	}
 
+	for port := range forwardutil.ParseCommentPorts(result.Stdout) {
+		usedPorts[port] = struct{}{}
+	}
+
+	return usedPorts, nil
+}
+
+func (ac *Command) inspectForwardTargets(apiClient *api.Client, simulationID string) (map[int]forwardutil.IPTablesTarget, error) {
+	result, err := ac.runCommandOnBastion(apiClient, simulationID, "sudo iptables-save -t nat 2>/dev/null || sudo iptables -t nat -S")
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect iptables rules: %w", err)
+	}
+	if result != nil && result.ExitCode != 0 {
+		return nil, fmt.Errorf("failed to inspect iptables rules: exit code %d: %s", result.ExitCode, result.Stderr)
+	}
+
+	if result == nil {
+		return map[int]forwardutil.IPTablesTarget{}, nil
+	}
+	return forwardutil.ParseIPTablesTargets(result.Stdout), nil
+}
+
+func (ac *Command) existingForwardNameError(apiClient *api.Client, simulationID string, existing api.EnableSSHResponse) error {
+	message := fmt.Sprintf("Forward name %q already used", ac.ForwardName)
+
+	targets, err := ac.inspectForwardTargets(apiClient, simulationID)
+	if err != nil {
+		logging.Verbose("Skipping existing forward target inspection: %v", err)
+	} else if current, ok := targets[existing.DestPort]; ok {
+		currentTarget := ac.formatExistingForwardTarget(apiClient, simulationID, current)
+		message = fmt.Sprintf("%s for %s", message, currentTarget)
+	}
+
+	return output.NewValidationError(
+		fmt.Sprintf("%s. Delete it or use a different name.", message),
+	)
+}
+
+func sameForwardHost(a, b string) bool {
+	ipA := net.ParseIP(a)
+	ipB := net.ParseIP(b)
+	if ipA != nil && ipB != nil {
+		return ipA.Equal(ipB)
+	}
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
+func (ac *Command) formatExistingForwardTarget(apiClient *api.Client, simulationID string, target forwardutil.IPTablesTarget) string {
+	host := target.Host
+	nodes, err := apiClient.GetNodes(simulationID)
+	if err == nil {
+		for _, n := range nodes {
+			metadata, err := node.ParseNodeMetadata(n.Metadata)
+			if err != nil {
+				continue
+			}
+			if sameForwardHost(metadata.MgmtIP, target.Host) {
+				host = n.Name
+				break
+			}
+		}
+	}
+	return net.JoinHostPort(host, strconv.Itoa(target.Port))
+}
+
+func nextAvailableListenPort(usedPorts map[int]struct{}, start int) (int, error) {
 	for port := start; port <= 65535; port++ {
 		if _, exists := usedPorts[port]; !exists {
 			return port, nil
@@ -274,6 +305,28 @@ func (ac *Command) findOutboundInterfaceID(apiClient *api.Client, simulationID s
 	}
 
 	return "", fmt.Errorf("no outbound interface found on oob-mgmt-server node")
+}
+
+func (ac *Command) runCommandOnBastion(apiClient *api.Client, simulationID, command string) (*bastion.ExecResult, error) {
+	sshHost, sshPort, err := ac.findSSHService(apiClient, simulationID)
+	if err != nil {
+		return nil, fmt.Errorf("could not locate SSH service for bastion: %w", err)
+	}
+
+	keyPath, err := defaultKeyPathFn()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get SSH key path: %w", err)
+	}
+
+	cfg := bastion.BastionExecConfig{
+		BastionUser: constant.DefaultUbuntuUser,
+		BastionAddr: net.JoinHostPort(sshHost, strconv.Itoa(sshPort)),
+		BastionKey:  keyPath,
+		TargetUser:  constant.DefaultUbuntuUser,
+		Command:     command,
+	}
+
+	return execCommandOnBastionFn(cfg)
 }
 
 func resolveForwardAddress(service api.EnableSSHResponse) string {
@@ -331,46 +384,28 @@ func (ac *Command) setupIPTables(apiClient *api.Client, simulationID, targetNode
 		return err
 	}
 
-	// Find the SSH bastion service address.
-	sshHost, sshPort, err := ac.findSSHService(apiClient, simulationID)
-	if err != nil {
-		return fmt.Errorf("could not locate SSH service for bastion: %w", err)
-	}
-
-	keyPath, err := defaultKeyPathFn()
-	if err != nil {
-		return fmt.Errorf("failed to get SSH key path: %w", err)
-	}
-
 	dst := net.JoinHostPort(dstIP, strconv.Itoa(targetPort))
+	comment := forwardutil.PortComment(listenPort)
 	script := fmt.Sprintf(`set -euo pipefail
 sudo sysctl -w net.ipv4.ip_forward=1
-if ! sudo iptables -t nat -C PREROUTING -p tcp --dport %d -j DNAT --to-destination '%s' >/dev/null 2>&1; then
-  sudo iptables -t nat -A PREROUTING -p tcp --dport %d -j DNAT --to-destination '%s'
+if ! sudo iptables -t nat -C PREROUTING -p tcp --dport %d -m comment --comment '%s' -j DNAT --to-destination '%s' >/dev/null 2>&1; then
+  sudo iptables -t nat -A PREROUTING -p tcp --dport %d -m comment --comment '%s' -j DNAT --to-destination '%s'
 fi
-if ! sudo iptables -t nat -C OUTPUT -p tcp -m addrtype --dst-type LOCAL --dport %d -j DNAT --to-destination '%s' >/dev/null 2>&1; then
-  sudo iptables -t nat -A OUTPUT -p tcp -m addrtype --dst-type LOCAL --dport %d -j DNAT --to-destination '%s'
+if ! sudo iptables -t nat -C OUTPUT -p tcp -m addrtype --dst-type LOCAL --dport %d -m comment --comment '%s' -j DNAT --to-destination '%s' >/dev/null 2>&1; then
+  sudo iptables -t nat -A OUTPUT -p tcp -m addrtype --dst-type LOCAL --dport %d -m comment --comment '%s' -j DNAT --to-destination '%s'
 fi
-if ! sudo iptables -t nat -C POSTROUTING -p tcp -d '%s' --dport %d -j MASQUERADE >/dev/null 2>&1; then
-  sudo iptables -t nat -A POSTROUTING -p tcp -d '%s' --dport %d -j MASQUERADE
+if ! sudo iptables -t nat -C POSTROUTING -p tcp -d '%s' --dport %d -m comment --comment '%s' -j MASQUERADE >/dev/null 2>&1; then
+  sudo iptables -t nat -A POSTROUTING -p tcp -d '%s' --dport %d -m comment --comment '%s' -j MASQUERADE
 fi`,
-		listenPort, dst,
-		listenPort, dst,
-		listenPort, dst,
-		listenPort, dst,
-		dstIP, targetPort,
-		dstIP, targetPort,
+		listenPort, comment, dst,
+		listenPort, comment, dst,
+		listenPort, comment, dst,
+		listenPort, comment, dst,
+		dstIP, targetPort, comment,
+		dstIP, targetPort, comment,
 	)
 
-	cfg := bastion.BastionExecConfig{
-		BastionUser: constant.DefaultUbuntuUser,
-		BastionAddr: net.JoinHostPort(sshHost, strconv.Itoa(sshPort)),
-		BastionKey:  keyPath,
-		TargetUser:  constant.DefaultUbuntuUser,
-		Command:     script,
-	}
-
-	result, err := execCommandOnBastionFn(cfg)
+	result, err := ac.runCommandOnBastion(apiClient, simulationID, script)
 	if err != nil {
 		return fmt.Errorf("iptables setup failed: %w", err)
 	}
@@ -415,12 +450,12 @@ func (ac *Command) findSSHService(apiClient *api.Client, simulationID string) (s
 		return "", 0, err
 	}
 	for _, svc := range services {
-		if strings.EqualFold(svc.ServiceType, "ssh") &&
-			forwardutil.IsBastionSSHServiceName(svc.Name) &&
+		if svc.NodeName == constant.OOBMgmtServerName &&
+			strings.EqualFold(svc.ServiceType, "ssh") &&
 			svc.Host != "" &&
 			svc.SrcPort > 0 {
 			return svc.Host, svc.SrcPort, nil
 		}
 	}
-	return "", 0, fmt.Errorf("SSH service not found; run 'nvair create' first")
+	return "", 0, fmt.Errorf("SSH service for %s not found; run 'nvair create' first", constant.OOBMgmtServerName)
 }

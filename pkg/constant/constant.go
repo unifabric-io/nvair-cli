@@ -31,6 +31,9 @@ const (
 	// OOBMgmtServerName is the name of the OOB management server node.
 	OOBMgmtServerName = "oob-mgmt-server"
 
+	// DefaultBastionSSHServiceName is the service name used for bastion SSH access.
+	DefaultBastionSSHServiceName = "bastion-ssh"
+
 	// OOBMgmtSwitchName is the name of the OOB management switch node.
 	OOBMgmtSwitchName = "oob-mgmt-switch"
 

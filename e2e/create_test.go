@@ -55,6 +55,7 @@ func TestIntegration_RealAPI_Create(t *testing.T) {
 	}
 
 	simName := "simple"
+	bootstrapNode := "node-gpu-1"
 	topoDir := filepath.Join("..", "examples", "simple")
 	installScriptPath := filepath.Join(topoDir, "install.sh")
 	assertUnifiedInstallScriptExists(t, installScriptPath)
@@ -67,9 +68,10 @@ func TestIntegration_RealAPI_Create(t *testing.T) {
 		logCommandOutput(t, deleteResult, "TestIntegration_RealAPI_Create_cleanup_delete")
 	})
 
-	installResult := runBashScript(t, env, installScriptPath, "--delete-if-exists", "-o", externalKubeconfigPath)
+	installResult := runBashScript(t, env, installScriptPath, "--delete-if-exists", "--bootstrap-node", bootstrapNode, "-o", externalKubeconfigPath)
 	logCommandOutput(t, installResult, "TestIntegration_RealAPI_Create_install")
 	if installResult.ExitCode != 0 {
+		collectRemoteKubesprayLog(t, env, simName, bootstrapNode)
 		t.Fatalf("install.sh failed with exit code %d: %v", installResult.ExitCode, installResult.Err)
 	}
 	if _, err := os.Stat(externalKubeconfigPath); err != nil {
@@ -305,6 +307,61 @@ func assertUnifiedInstallScriptExists(t *testing.T, installScriptPath string) {
 	if _, err := os.Stat(installScriptPath); err != nil {
 		t.Fatalf("unified install script not found at %q: %v", installScriptPath, err)
 	}
+}
+
+func collectRemoteKubesprayLog(t *testing.T, env []string, simulationName, bootstrapNode string) {
+	t.Helper()
+
+	artifactDir := filepath.Join(os.TempDir(), "nvair-e2e")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Logf("failed to create Kubespray log artifact directory %q: %v", artifactDir, err)
+		return
+	}
+
+	localLogPath := filepath.Join(
+		artifactDir,
+		fmt.Sprintf("%s-%s-kubespray.log", safeArtifactName(t.Name()), safeArtifactName(simulationName)),
+	)
+	remoteLogPath := fmt.Sprintf("%s:/tmp/kubespray.log", bootstrapNode)
+
+	result := runCommand(t, env, "--verbose", "cp", "-s", simulationName, remoteLogPath, localLogPath)
+	logCommandOutput(t, result, "TestIntegration_RealAPI_Create_collect_kubespray_log")
+	if result.ExitCode != 0 {
+		t.Logf("failed to copy remote Kubespray log %s to %s; install.sh may not have created /tmp/kubespray.log", remoteLogPath, localLogPath)
+		return
+	}
+
+	content, err := os.ReadFile(localLogPath)
+	if err != nil {
+		t.Logf("copied remote Kubespray log to %s but failed to read it: %v", localLogPath, err)
+		return
+	}
+
+	t.Logf("copied remote Kubespray log %s to local artifact %s", remoteLogPath, localLogPath)
+	t.Logf("--- kubespray.log tail ---\n%s", tailLines(string(content), 200))
+}
+
+func safeArtifactName(raw string) string {
+	replacer := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		" ", "_",
+	)
+	return replacer.Replace(raw)
+}
+
+func tailLines(content string, maxLines int) string {
+	content = strings.TrimRight(content, "\n")
+	if content == "" {
+		return "(empty)"
+	}
+
+	lines := strings.Split(content, "\n")
+	if maxLines > 0 && len(lines) > maxLines {
+		return strings.Join(lines[len(lines)-maxLines:], "\n")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func runBashScript(t *testing.T, env []string, scriptPath string, args ...string) *CommandResult {

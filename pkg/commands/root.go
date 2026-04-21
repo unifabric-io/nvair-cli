@@ -165,25 +165,22 @@ func (rc *RootCommand) newDeleteCommand() *cobra.Command {
 	deleteCmd.Register(cmd)
 
 	forwardCmd := &cobra.Command{
-		Use:           "forward",
+		Use:           "forward <forward-name>",
 		Aliases:       []string{"forwards"},
-		Short:         "Delete a forward service by target",
+		Short:         "Delete a forward service by name",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Args:          cobra.NoArgs,
+		Args:          cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deleteCmd.Verbose = rc.Verbose
 			deleteCmd.Stderr = cmd.ErrOrStderr()
 			deleteCmd.ResourceType = "forward"
+			deleteCmd.ResourceName = args[0]
 			deleteCmd.SimulationName, _ = cmd.Flags().GetString("simulation")
-			deleteCmd.TargetNode, _ = cmd.Flags().GetString("target-node")
-			deleteCmd.TargetPort, _ = cmd.Flags().GetInt("target-port")
 			return deleteCmd.Execute()
 		},
 	}
 	forwardCmd.Flags().StringP("simulation", "s", "", "Simulation name (optional when only one simulation exists)")
-	forwardCmd.Flags().StringVar(&deleteCmd.TargetNode, "target-node", "", "Target node name")
-	forwardCmd.Flags().IntVar(&deleteCmd.TargetPort, "target-port", 0, "Target port on target node")
 	cmd.AddCommand(forwardCmd)
 
 	return cmd

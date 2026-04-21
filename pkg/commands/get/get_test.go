@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/unifabric-io/nvair-cli/pkg/bastion"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
 	"github.com/unifabric-io/nvair-cli/pkg/testutil"
 )
@@ -285,6 +286,13 @@ func TestAliasesEquivalentForSimulationsJSON(t *testing.T) {
 }
 
 func TestGetForward_DefaultOutput(t *testing.T) {
+	stubBastionExecution(t, func(cfg bastion.BastionExecConfig) (*bastion.ExecResult, error) {
+		return &bastion.ExecResult{
+			ExitCode: 0,
+			Stdout:   `-A PREROUTING -p tcp --dport 20000 -m comment --comment "nvair cli port: 20000" -j DNAT --to-destination 192.168.200.6:22`,
+		}, nil
+	})
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v2/simulations":
@@ -293,9 +301,15 @@ func TestGetForward_DefaultOutput(t *testing.T) {
 		case "/v1/service":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
-				{"id":"svc-1","name":"forward-22->oob-mgmt-server:22","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"},
-				{"id":"svc-2","name":"forward-20000->node-gpu-1:22","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
+				{"id":"svc-1","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"},
+				{"id":"svc-2","name":"gpu-ssh","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
 			]`))
+		case "/v2/simulations/nodes/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":2,"results":[
+				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
+				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
+			]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -308,10 +322,21 @@ func TestGetForward_DefaultOutput(t *testing.T) {
 		t.Fatalf("execute failed: %v", err)
 	}
 
-	if !strings.Contains(stdout, "NAME") || !strings.Contains(stdout, "EXTERNAL") || !strings.Contains(stdout, "TARGET") {
-		t.Fatalf("expected table header in output, got: %q", stdout)
+	table := splitTableFields(t, stdout)
+	if got, want := strings.Join(table[0], ","), "NAME,EXTERNAL,TARGET"; got != want {
+		t.Fatalf("expected table header %s, got %q in output %q", want, table[0], stdout)
 	}
-	if !strings.Contains(stdout, "forward-22->oob-mgmt-server:22") {
+	for rowIndex, fields := range table[1:] {
+		if len(fields) != len(table[0]) {
+			t.Fatalf("expected row %d to have %d columns, got %d (%v) in output %q", rowIndex+1, len(table[0]), len(fields), fields, stdout)
+		}
+		for _, field := range fields {
+			if field == "ssh" || field == "other" {
+				t.Fatalf("did not expect service type value %q in output row %d: %q", field, rowIndex+1, stdout)
+			}
+		}
+	}
+	if !strings.Contains(stdout, "bastion-ssh") {
 		t.Fatalf("expected ssh forward row, got: %q", stdout)
 	}
 	if !strings.Contains(stdout, "oob-mgmt-server:22") {
@@ -325,7 +350,18 @@ func TestGetForward_DefaultOutput(t *testing.T) {
 	}
 }
 
-func TestGetForward_JSONOutput(t *testing.T) {
+func TestGetForward_DefaultOutputUsesIPTablesTargetsForExplicitNames(t *testing.T) {
+	stubBastionExecution(t, func(cfg bastion.BastionExecConfig) (*bastion.ExecResult, error) {
+		if !strings.Contains(cfg.Command, "iptables-save") {
+			t.Fatalf("expected iptables inspection command, got: %s", cfg.Command)
+		}
+		return &bastion.ExecResult{
+			ExitCode: 0,
+			Stdout: `-A PREROUTING -p tcp --dport 20000 -m comment --comment "nvair cli port: 20000" -j DNAT --to-destination 192.168.200.6:6443
+-A OUTPUT -p tcp --dport 20000 -m comment --comment "nvair cli port: 20000" -j DNAT --to-destination 192.168.200.6:6443`,
+		}, nil
+	})
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v2/simulations":
@@ -334,9 +370,63 @@ func TestGetForward_JSONOutput(t *testing.T) {
 		case "/v1/service":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
-				{"id":"svc-1","name":"forward-22->oob-mgmt-server:22","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"},
-				{"id":"svc-2","name":"forward-20000->node-gpu-1:22","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
+				{"id":"svc-1","name":"gpu-api","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"},
+				{"id":"svc-ssh","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"}
 			]`))
+		case "/v2/simulations/nodes/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":2,"results":[
+				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
+				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
+			]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	stdout, _, err := executeGetWithIO(t, []string{"forward", "--simulation", "lab-a"}, server.URL)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	if !strings.Contains(stdout, "gpu-api") {
+		t.Fatalf("expected explicit forward name in output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "node-gpu-1:6443") {
+		t.Fatalf("expected iptables target in output, got: %q", stdout)
+	}
+	if strings.Contains(stdout, "oob-mgmt-server:20000") {
+		t.Fatalf("did not expect API-level oob target after iptables enrichment, got: %q", stdout)
+	}
+}
+
+func TestGetForward_JSONOutput(t *testing.T) {
+	stubBastionExecution(t, func(cfg bastion.BastionExecConfig) (*bastion.ExecResult, error) {
+		return &bastion.ExecResult{
+			ExitCode: 0,
+			Stdout:   `-A PREROUTING -p tcp --dport 20000 -m comment --comment "nvair cli port: 20000" -j DNAT --to-destination 192.168.200.6:22`,
+		}, nil
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v2/simulations":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
+		case "/v1/service":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"id":"svc-1","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"},
+				{"id":"svc-2","name":"gpu-ssh","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
+			]`))
+		case "/v2/simulations/nodes/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":2,"results":[
+				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
+				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
+			]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -356,21 +446,31 @@ func TestGetForward_JSONOutput(t *testing.T) {
 	if len(forwards) != 2 {
 		t.Fatalf("expected 2 forwards, got %d", len(forwards))
 	}
-	if forwards[0]["name"] != "forward-20000->node-gpu-1:22" {
-		t.Fatalf("expected sorted first forward by name, got: %v", forwards[0]["name"])
+	if forwards[0]["name"] != "bastion-ssh" {
+		t.Fatalf("expected forward at index 0 to be bastion-ssh, got: %v", forwards[0]["name"])
 	}
-	if forwards[0]["target_host"] != "node-gpu-1" {
-		t.Fatalf("expected parsed target host, got: %v", forwards[0]["target_host"])
+	if forwards[1]["name"] != "gpu-ssh" {
+		t.Fatalf("expected forward at index 1 to be gpu-ssh, got: %v", forwards[1]["name"])
 	}
-	if forwards[0]["target_port"] != float64(22) {
-		t.Fatalf("expected parsed target port, got: %v", forwards[0]["target_port"])
+	if forwards[1]["target_host"] != "node-gpu-1" {
+		t.Fatalf("expected iptables target host, got: %v", forwards[1]["target_host"])
 	}
-	if forwards[1]["address"] != "ssh://ubuntu@worker01.air.nvidia.com:16821" {
-		t.Fatalf("expected ssh link address, got: %v", forwards[1]["address"])
+	if forwards[1]["target_port"] != float64(22) {
+		t.Fatalf("expected iptables target port, got: %v", forwards[1]["target_port"])
+	}
+	if forwards[0]["address"] != "ssh://ubuntu@worker01.air.nvidia.com:16821" {
+		t.Fatalf("expected ssh link address, got: %v", forwards[0]["address"])
 	}
 }
 
 func TestGetForward_YAMLOutput(t *testing.T) {
+	stubBastionExecution(t, func(cfg bastion.BastionExecConfig) (*bastion.ExecResult, error) {
+		return &bastion.ExecResult{
+			ExitCode: 0,
+			Stdout:   `-A PREROUTING -p tcp --dport 20000 -m comment --comment "nvair cli port: 20000" -j DNAT --to-destination 192.168.200.6:22`,
+		}, nil
+	})
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v2/simulations":
@@ -379,8 +479,15 @@ func TestGetForward_YAMLOutput(t *testing.T) {
 		case "/v1/service":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
-				{"id":"svc-1","name":"forward-20000->node-gpu-1:22","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
+				{"id":"svc-1","name":"gpu-ssh","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"},
+				{"id":"svc-ssh","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"}
 			]`))
+		case "/v2/simulations/nodes/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":2,"results":[
+				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
+				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
+			]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -400,10 +507,10 @@ func TestGetForward_YAMLOutput(t *testing.T) {
 		t.Fatalf("expected resolved address in yaml output, got: %q", out)
 	}
 	if !strings.Contains(out, "target_host: node-gpu-1") {
-		t.Fatalf("expected parsed target host in yaml output, got: %q", out)
+		t.Fatalf("expected iptables target host in yaml output, got: %q", out)
 	}
 	if !strings.Contains(out, "target_port: 22") {
-		t.Fatalf("expected parsed target port in yaml output, got: %q", out)
+		t.Fatalf("expected iptables target port in yaml output, got: %q", out)
 	}
 }
 
@@ -411,6 +518,42 @@ func executeGet(t *testing.T, args []string, endpoint string) (string, error) {
 	t.Helper()
 	stdout, _, err := executeGetWithIO(t, args, endpoint)
 	return stdout, err
+}
+
+func splitTableFields(t *testing.T, output string) [][]string {
+	t.Helper()
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	table := make([][]string, 0, len(lines))
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) > 0 {
+			table = append(table, fields)
+		}
+	}
+
+	if len(table) == 0 {
+		t.Fatalf("expected table output, got: %q", output)
+	}
+
+	return table
+}
+
+func stubBastionExecution(t *testing.T, execFn func(cfg bastion.BastionExecConfig) (*bastion.ExecResult, error)) {
+	t.Helper()
+
+	oldKeyPathFn := defaultKeyPathFn
+	oldExecFn := execCommandOnBastionFn
+
+	defaultKeyPathFn = func() (string, error) {
+		return "/tmp/nvair-test-key", nil
+	}
+	execCommandOnBastionFn = execFn
+
+	t.Cleanup(func() {
+		defaultKeyPathFn = oldKeyPathFn
+		execCommandOnBastionFn = oldExecFn
+	})
 }
 
 func executeGetWithIO(t *testing.T, args []string, endpoint string) (string, string, error) {

@@ -1,6 +1,6 @@
 # CLI Command Reference
 
-``` bash
+```bash
 nvair <command> [options]
 
 Commands:
@@ -31,7 +31,7 @@ Commands:
     simulation                     Delete a simulation
       <name>                       Simulation name (required)
     forward                        Delete a port forwarding rule
-      <name>                       Forward service name (required)
+      <forward-name>               Forward service name (required)
       -s, --simulation <name>      Simulation name (optional when only one simulation exists)
        
   exec                             Execute commands on nodes via SSH
@@ -43,12 +43,11 @@ Commands:
       <command>                    Command to execute (required)
        
   add                              Add resources
-    forward                        Add a port forwarding rule 
+    forward                        Add a port forwarding rule
+      <forward-name>               Forward service name (required)
       -s, --simulation <name>      Simulation name (optional when only one simulation exists)
-          --listen-port <port>     Listen port on oob-mgmt-server (required)
-      --target-port <port>         Target port on target host or IP (optional; defaults to listen port)
-          --target-host <node|ip>  Target node name or IP (required)
-      --type <ssh|https|http|other> Forward type (default: other)
+          --target-node <node>     Target node name (required)
+          --target-port <port>     Target port on target node (required)
 
 Global Options:
   -v, --verbose                    Enable verbose logging for debugging

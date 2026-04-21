@@ -533,7 +533,7 @@ func TestGetServices_Success(t *testing.T) {
 		resp := []EnableSSHResponse{
 			{
 				ID:          "svc-1",
-				Name:        "forward-22->oob-mgmt-server:22",
+				Name:        "bastion-ssh",
 				ServiceType: "ssh",
 				Host:        "worker01.air.nvidia.com",
 				SrcPort:     16821,

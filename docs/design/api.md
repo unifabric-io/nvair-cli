@@ -269,7 +269,7 @@ Enable ssh forward
 Request:
 ```json
 {
-    "name": "forward-22->oob-mgmt-server:22",
+    "name": "bastion-ssh",
     "simulation": "87eece83-83f0-4ccb-92ab-258fcbab4d3b",
     "interface": "ac6975d0-b988-40ec-90e2-b59f0d006064",
     "dest_port": 22,
@@ -282,7 +282,7 @@ Response (201 Created):
 {
     "url": "https://air.nvidia.com/api/v1/service/aeeca4f4-c22c-4bf3-84df-ff80ccf4f9ee/",
     "id": "aeeca4f4-c22c-4bf3-84df-ff80ccf4f9ee",
-    "name": "forward-22->oob-mgmt-server:22",
+    "name": "bastion-ssh",
     "simulation": "https://air.nvidia.com/api/v1/simulation/87eece83-83f0-4ccb-92ab-258fcbab4d3b/",
     "interface": "https://air.nvidia.com/api/v1/simulation-interface/ac6975d0-b988-40ec-90e2-b59f0d006064/",
     "dest_port": 22,
@@ -308,7 +308,7 @@ Response (200 OK):
 [
   {
     "id": "aeeca4f4-c22c-4bf3-84df-ff80ccf4f9ee",
-    "name": "forward-22->oob-mgmt-server:22",
+    "name": "bastion-ssh",
     "simulation": "87eece83-83f0-4ccb-92ab-258fcbab4d3b",
     "interface": "ac6975d0-b988-40ec-90e2-b59f0d006064",
     "dest_port": 22,

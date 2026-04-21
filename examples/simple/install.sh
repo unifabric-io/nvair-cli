@@ -9,8 +9,9 @@ SIMULATION=""
 KUBECONFIG_FORWARD_OUT="${KUBECONFIG_FORWARD_OUT:-}"
 DELETE_IF_EXISTS="${DELETE_IF_EXISTS:-false}"
 BOOTSTRAP_NODE="${BOOTSTRAP_NODE:-gpu-node-1}"
+KUBE_API_FORWARD_NAME="${KUBE_API_FORWARD_NAME:-kube-api}"
 KUBESPRAY_REPO_URL="${KUBESPRAY_REPO_URL:-https://github.com/kubernetes-sigs/kubespray.git}"
-KUBESPRAY_REF="${KUBESPRAY_REF:-}"
+KUBESPRAY_REF="${KUBESPRAY_REF:-v2.26.1}"
 KUBESPRAY_DIR="${KUBESPRAY_DIR:-/home/ubuntu/kubespray}"
 
 usage() {
@@ -30,6 +31,7 @@ Environment:
   KUBECONFIG_FORWARD_OUT   External kubeconfig output path (same as --output)
   DELETE_IF_EXISTS         true|false (default: false)
   BOOTSTRAP_NODE           Same as --bootstrap-node
+  KUBE_API_FORWARD_NAME    Forward name for Kubernetes API access (default: kube-api)
   KUBESPRAY_REPO_URL       Kubespray git repo URL
   KUBESPRAY_REF            Optional git ref/branch/tag to checkout
   KUBESPRAY_DIR            Kubespray directory on bootstrap node (default: /home/ubuntu/kubespray)
@@ -153,9 +155,11 @@ fi
 
 step "PHASE 1/7 — Create Simulation"
 log "Creating simulation from ${TOPOLOGY_DIR} (delete-if-exists=${DELETE_IF_EXISTS})..."
+log "[CMD] ${NVAIR_BIN} create ${CREATE_ARGS[*]}"
 "${NVAIR_BIN}" create "${CREATE_ARGS[@]}"
 
 log "Discovering GPU nodes..."
+log "[CMD] ${NVAIR_BIN} get nodes ${SIM_ARGS[*]}"
 mapfile -t GPU_NODES < <(
   "${NVAIR_BIN}" get nodes "${SIM_ARGS[@]}" \
     | awk 'NR>1 && ($1 ~ /^node-gpu-/ || $1 ~ /^gpu-node-/) { print $1 }' \
@@ -330,6 +334,7 @@ rm -rf inventory/nvair
 cp -rfp inventory/sample inventory/nvair
 mkdir -p inventory/nvair/group_vars/k8s_cluster"
 
+log "[CMD] ${NVAIR_BIN} cp ${SIM_ARGS[*]} ${HOSTS_FILE} ${BOOTSTRAP_NODE}:${KUBESPRAY_DIR}/inventory/nvair/hosts.yaml"
 "${NVAIR_BIN}" cp "${SIM_ARGS[@]}" "${HOSTS_FILE}" "${BOOTSTRAP_NODE}:${KUBESPRAY_DIR}/inventory/nvair/hosts.yaml"
 rm -f "${HOSTS_FILE}"
 
@@ -356,13 +361,27 @@ sudo chown \"\$(id -u):\$(id -g)\" \"\$HOME/.kube/config\""
 
 
 step "PHASE 7/7 — Expose Kubernetes API"
-log "Ensuring forward for Kubernetes API (${BOOTSTRAP_NODE}:6443)..."
-"${NVAIR_BIN}" add forward "${SIM_ARGS[@]}" --target-node "${BOOTSTRAP_NODE}" --target-port 6443
+log "Ensuring forward ${KUBE_API_FORWARD_NAME} for Kubernetes API (${BOOTSTRAP_NODE}:6443)..."
+log "[CMD] ${NVAIR_BIN} get forward ${SIM_ARGS[*]}"
+FORWARD_LIST="$("${NVAIR_BIN}" get forward "${SIM_ARGS[@]}")"
+EXISTING_FORWARD_TARGET="$(awk -v name="${KUBE_API_FORWARD_NAME}" 'NR>1 && $1 == name { print $3; exit }' <<<"${FORWARD_LIST}")"
+if [[ -z "${EXISTING_FORWARD_TARGET}" ]]; then
+  log "[CMD] ${NVAIR_BIN} add forward ${KUBE_API_FORWARD_NAME} ${SIM_ARGS[*]} --target-node ${BOOTSTRAP_NODE} --target-port 6443"
+  "${NVAIR_BIN}" add forward "${KUBE_API_FORWARD_NAME}" "${SIM_ARGS[@]}" --target-node "${BOOTSTRAP_NODE}" --target-port 6443
+  log "[CMD] ${NVAIR_BIN} get forward ${SIM_ARGS[*]}"
+  FORWARD_LIST="$("${NVAIR_BIN}" get forward "${SIM_ARGS[@]}")"
+elif [[ "${EXISTING_FORWARD_TARGET}" != "${BOOTSTRAP_NODE}:6443" ]]; then
+  echo "Forward ${KUBE_API_FORWARD_NAME} already points to ${EXISTING_FORWARD_TARGET}; expected ${BOOTSTRAP_NODE}:6443." >&2
+  echo "Delete it or set KUBE_API_FORWARD_NAME to a different name." >&2
+  exit 1
+else
+  log "Forward ${KUBE_API_FORWARD_NAME} already exists for ${EXISTING_FORWARD_TARGET}; reusing it."
+fi
 
-log "Resolving external forward address for ${BOOTSTRAP_NODE}:6443..."
-FORWARD_HOSTPORT="$("${NVAIR_BIN}" get forward "${SIM_ARGS[@]}" | awk 'NR>1 && $3 ~ /:6443$/ { print $2; exit }')"
+log "Resolving external forward address for ${KUBE_API_FORWARD_NAME}..."
+FORWARD_HOSTPORT="$(awk -v name="${KUBE_API_FORWARD_NAME}" 'NR>1 && $1 == name { print $2; exit }' <<<"${FORWARD_LIST}")"
 if [[ -z "${FORWARD_HOSTPORT}" ]]; then
-  echo "Failed to resolve forward address for ${BOOTSTRAP_NODE}:6443." >&2
+  echo "Failed to resolve forward address for ${KUBE_API_FORWARD_NAME}." >&2
   exit 1
 fi
 
@@ -381,6 +400,7 @@ yq -i '.clusters[].cluster.insecure-skip-tls-verify = true' \"\${REMOTE_EXTERNAL
 yq -i \".clusters[].cluster.server = \\\"https://\${FORWARD_HOSTPORT}\\\"\" \"\${REMOTE_EXTERNAL_KUBECONFIG}\""
 
 log "Exporting external kubeconfig to local file: ${KUBECONFIG_FORWARD_OUT}"
+log "[CMD] ${NVAIR_BIN} cp ${SIM_ARGS[*]} ${BOOTSTRAP_NODE}:${REMOTE_EXTERNAL_KUBECONFIG} ${KUBECONFIG_FORWARD_OUT}"
 "${NVAIR_BIN}" cp "${SIM_ARGS[@]}" "${BOOTSTRAP_NODE}:${REMOTE_EXTERNAL_KUBECONFIG}" "${KUBECONFIG_FORWARD_OUT}"
 
 log "Done."

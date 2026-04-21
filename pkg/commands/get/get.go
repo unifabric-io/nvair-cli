@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/unifabric-io/nvair-cli/pkg/api"
+	"github.com/unifabric-io/nvair-cli/pkg/bastion"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
 	"github.com/unifabric-io/nvair-cli/pkg/constant"
 	forwardutil "github.com/unifabric-io/nvair-cli/pkg/forward"
@@ -23,12 +24,20 @@ import (
 	"github.com/unifabric-io/nvair-cli/pkg/node"
 	"github.com/unifabric-io/nvair-cli/pkg/output"
 	"github.com/unifabric-io/nvair-cli/pkg/simulation"
+	sshpkg "github.com/unifabric-io/nvair-cli/pkg/ssh"
 )
 
 const (
 	formatDefault = "default"
 	formatJSON    = "json"
 	formatYAML    = "yaml"
+)
+
+const managedForwardListenPortStart = 20000
+
+var (
+	defaultKeyPathFn       = sshpkg.DefaultKeyPath
+	execCommandOnBastionFn = bastion.ExecCommandOnBastion
 )
 
 // NodeCount holds per-simulation node type counts.
@@ -229,6 +238,9 @@ func (gc *Command) executeForward(cmd *cobra.Command) error {
 	}
 
 	forwards := buildForwardViews(services)
+	if shouldInspectForwardTargets(services) {
+		forwards = gc.enrichForwardTargetsFromIPTables(apiClient, resolvedSimulation.ID, forwards)
+	}
 	return renderForwardOutput(cmd.OutOrStdout(), forwards, format)
 }
 
@@ -357,13 +369,6 @@ func buildForwardViews(services []api.EnableSSHResponse) []ForwardView {
 }
 
 func resolveForwardTarget(service api.EnableSSHResponse) (string, int) {
-	if parsed, ok := forwardutil.ParseServiceName(service.Name); ok {
-		return parsed.TargetHost, parsed.TargetPort
-	}
-	if forwardutil.IsBastionSSHServiceName(service.Name) {
-		return constant.OOBMgmtServerName, 22
-	}
-
 	return service.NodeName, service.DestPort
 }
 
@@ -383,6 +388,118 @@ func resolveForwardAddress(service api.EnableSSHResponse) string {
 	default:
 		return "-"
 	}
+}
+
+func shouldInspectForwardTargets(services []api.EnableSSHResponse) bool {
+	for _, service := range services {
+		if service.DestPort < managedForwardListenPortStart {
+			continue
+		}
+		if strings.EqualFold(service.ServiceType, "ssh") {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func (gc *Command) enrichForwardTargetsFromIPTables(apiClient *api.Client, simulationID string, forwards []ForwardView) []ForwardView {
+	targets, err := gc.inspectForwardTargets(apiClient, simulationID)
+	if err != nil {
+		logging.Verbose("Skipping iptables target inspection: %v", err)
+		return forwards
+	}
+	if len(targets) == 0 {
+		return forwards
+	}
+
+	nodeNamesByIP := gc.nodeNamesByMgmtIP(apiClient, simulationID)
+	for i := range forwards {
+		target, ok := targets[forwards[i].DestPort]
+		if !ok {
+			continue
+		}
+
+		targetHost := target.Host
+		if nodeName, ok := nodeNamesByIP[targetHost]; ok {
+			targetHost = nodeName
+		}
+		forwards[i].TargetHost = targetHost
+		forwards[i].TargetPort = target.Port
+	}
+
+	return forwards
+}
+
+func (gc *Command) inspectForwardTargets(apiClient *api.Client, simulationID string) (map[int]forwardutil.IPTablesTarget, error) {
+	result, err := gc.runCommandOnBastion(apiClient, simulationID, "sudo iptables-save -t nat 2>/dev/null || sudo iptables -t nat -S")
+	if err != nil {
+		return nil, err
+	}
+	if result != nil && result.ExitCode != 0 {
+		return nil, fmt.Errorf("iptables inspection exited with code %d: %s", result.ExitCode, result.Stderr)
+	}
+
+	if result == nil {
+		return map[int]forwardutil.IPTablesTarget{}, nil
+	}
+	return forwardutil.ParseIPTablesTargets(result.Stdout), nil
+}
+
+func (gc *Command) nodeNamesByMgmtIP(apiClient *api.Client, simulationID string) map[string]string {
+	namesByIP := make(map[string]string)
+
+	nodes, err := apiClient.GetNodes(simulationID)
+	if err != nil {
+		logging.Verbose("Skipping node IP lookup for forward targets: %v", err)
+		return namesByIP
+	}
+	for _, n := range nodes {
+		metadata, err := node.ParseNodeMetadata(n.Metadata)
+		if err != nil || metadata.MgmtIP == "" {
+			continue
+		}
+		namesByIP[strings.TrimSpace(metadata.MgmtIP)] = n.Name
+	}
+
+	return namesByIP
+}
+
+func (gc *Command) runCommandOnBastion(apiClient *api.Client, simulationID, command string) (*bastion.ExecResult, error) {
+	sshHost, sshPort, err := gc.findSSHService(apiClient, simulationID)
+	if err != nil {
+		return nil, err
+	}
+
+	keyPath, err := defaultKeyPathFn()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get SSH key path: %w", err)
+	}
+
+	cfg := bastion.BastionExecConfig{
+		BastionUser: constant.DefaultUbuntuUser,
+		BastionAddr: net.JoinHostPort(sshHost, strconv.Itoa(sshPort)),
+		BastionKey:  keyPath,
+		TargetUser:  constant.DefaultUbuntuUser,
+		Command:     command,
+	}
+
+	return execCommandOnBastionFn(cfg)
+}
+
+func (gc *Command) findSSHService(apiClient *api.Client, simulationID string) (string, int, error) {
+	services, err := apiClient.GetServices(simulationID)
+	if err != nil {
+		return "", 0, err
+	}
+	for _, svc := range services {
+		if strings.EqualFold(svc.ServiceType, "ssh") &&
+			svc.Host != "" &&
+			svc.SrcPort > 0 {
+			return svc.Host, svc.SrcPort, nil
+		}
+	}
+	return "", 0, fmt.Errorf("SSH service not found; run 'nvair create' first")
 }
 
 func renderNodeOutput(w io.Writer, nodes []NodeView, format string) error {
@@ -457,10 +574,9 @@ func renderForwardOutput(w io.Writer, forwards []ForwardView, format string) err
 				forward.Name,
 				external,
 				dest,
-				forward.ServiceType,
 			})
 		}
-		return writeTable(w, []string{"NAME", "EXTERNAL", "TARGET", "TYPE"}, rows)
+		return writeTable(w, []string{"NAME", "EXTERNAL", "TARGET"}, rows)
 	}
 }
 

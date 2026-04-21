@@ -152,16 +152,16 @@ When you need to expose internal UI components of the cluster externally, direct
 
 ```log
 # The example maps port 6443 on gpu-node-1 to an externally accessible address (worker04.air.nvidia.com:22978).
-$ nvair add forward --target-node gpu-node-1 --target-port 6443
+$ nvair add forward k8s-api --target-node gpu-node-1 --target-port 6443
 ✓ Forward service created successfully.
-    worker04.air.nvidia.com:22978 -> gpu-node-1:6443
+  worker04.air.nvidia.com:22978 -> gpu-node-1:6443
 
 # List port forward rules in a simulation
 $ nvair get forward
 Using simulation "simple" by default. Use -s/--simulation <name> to specify a different simulation.
-NAME                            EXTERNAL                       TARGET              TYPE
-forward-20000->gpu-node-1:6443  worker04.air.nvidia.com:21676  gpu-node-1:6443     other
-forward-22->oob-mgmt-server:22  worker04.air.nvidia.com:27176  oob-mgmt-server:22  ssh
+NAME                            EXTERNAL                       TARGET
+k8s-api                         worker04.air.nvidia.com:22978  gpu-node-1:6443
+bastion-ssh                     worker04.air.nvidia.com:27176  oob-mgmt-server:22
 ```
 > The source port `22978` is randomly assigned by the NVIDIA Air platform and cannot be specified.
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/unifabric-io/nvair-cli/pkg/bastion"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
 )
 
@@ -53,8 +54,15 @@ func TestExecute_MissingMappedFields(t *testing.T) {
 	}
 }
 
-func TestExecute_DeleteForwardByTarget(t *testing.T) {
+func TestExecute_DeleteForwardByName(t *testing.T) {
 	var deleteCalled bool
+	var bastionAddr string
+	var cleanupCommand string
+	stubBastionExecution(t, func(cfg bastion.BastionExecConfig) (*bastion.ExecResult, error) {
+		bastionAddr = cfg.BastionAddr
+		cleanupCommand = cfg.Command
+		return &bastion.ExecResult{ExitCode: 0}, nil
+	})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -64,8 +72,8 @@ func TestExecute_DeleteForwardByTarget(t *testing.T) {
 		case r.URL.Path == "/v1/service" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
-				{"id":"svc-1","name":"forward-22->oob-mgmt-server:22","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"},
-				{"id":"svc-2","name":"forward-20000->node-gpu-1:6443","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
+				{"id":"svc-1","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"2001:db8::1","link":"","node_name":"oob-mgmt-server"},
+				{"id":"svc-2","name":"gpu-api","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
 			]`))
 		case r.URL.Path == "/v1/service/svc-2/" && r.Method == "DELETE":
 			deleteCalled = true
@@ -81,9 +89,8 @@ func TestExecute_DeleteForwardByTarget(t *testing.T) {
 	dc := NewCommand()
 	dc.APIEndpoint = server.URL
 	dc.ResourceType = "forward"
+	dc.ResourceName = "gpu-api"
 	dc.SimulationName = "lab-a"
-	dc.TargetNode = "node-gpu-1"
-	dc.TargetPort = 6443
 
 	if err := dc.Execute(); err != nil {
 		t.Fatalf("execute delete forward failed: %v", err)
@@ -91,13 +98,35 @@ func TestExecute_DeleteForwardByTarget(t *testing.T) {
 	if !deleteCalled {
 		t.Fatalf("expected DELETE /v1/service/svc-2/ to be called")
 	}
-	if dc.ResourceName != "forward-20000->node-gpu-1:6443" {
+	if dc.ResourceName != "gpu-api" {
 		t.Fatalf("expected deleted resource name to be set, got %q", dc.ResourceName)
+	}
+	if bastionAddr != "[2001:db8::1]:16821" {
+		t.Fatalf("expected IPv6 bastion address to use net.JoinHostPort formatting, got %q", bastionAddr)
+	}
+	if !strings.Contains(cleanupCommand, "nvair cli port: 20000") {
+		t.Fatalf("expected cleanup command to target nvair port comment, got: %s", cleanupCommand)
+	}
+	if strings.Contains(cleanupCommand, "nl -w1") || strings.Contains(cleanupCommand, "line_number") {
+		t.Fatalf("expected cleanup command not to delete by iptables -S line number, got: %s", cleanupCommand)
+	}
+	if strings.Contains(cleanupCommand, "eval") {
+		t.Fatalf("expected cleanup command not to use eval, got: %s", cleanupCommand)
+	}
+	if !strings.Contains(cleanupCommand, `sed -n "s/^-A $chain /-D $chain /p"`) {
+		t.Fatalf("expected cleanup command to transform matching -A rules into -D rules, got: %s", cleanupCommand)
+	}
+	if !strings.Contains(cleanupCommand, `xargs -r sudo iptables -t nat`) {
+		t.Fatalf("expected cleanup command to execute transformed rules without eval, got: %s", cleanupCommand)
 	}
 }
 
-func TestExecute_DeleteForwardByTarget_CompatibleWithLegacyName(t *testing.T) {
+func TestExecute_DeleteForwardByName_NonManagedPortSkipsIPTablesCleanup(t *testing.T) {
 	var deleteCalled bool
+	stubBastionExecution(t, func(cfg bastion.BastionExecConfig) (*bastion.ExecResult, error) {
+		t.Fatalf("did not expect iptables cleanup for non-managed listen port")
+		return nil, nil
+	})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -107,7 +136,7 @@ func TestExecute_DeleteForwardByTarget_CompatibleWithLegacyName(t *testing.T) {
 		case r.URL.Path == "/v1/service" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
-				{"id":"svc-1","name":"forward-ssh-10022->node-gpu-1:22","simulation":"sim-1","dest_port":10022,"src_port":17922,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
+				{"id":"svc-1","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
 			]`))
 		case r.URL.Path == "/v1/service/svc-1/" && r.Method == "DELETE":
 			deleteCalled = true
@@ -123,9 +152,8 @@ func TestExecute_DeleteForwardByTarget_CompatibleWithLegacyName(t *testing.T) {
 	dc := NewCommand()
 	dc.APIEndpoint = server.URL
 	dc.ResourceType = "forward"
+	dc.ResourceName = "bastion-ssh"
 	dc.SimulationName = "lab-a"
-	dc.TargetNode = "node-gpu-1"
-	dc.TargetPort = 22
 
 	if err := dc.Execute(); err != nil {
 		t.Fatalf("execute delete forward failed: %v", err)
@@ -135,7 +163,7 @@ func TestExecute_DeleteForwardByTarget_CompatibleWithLegacyName(t *testing.T) {
 	}
 }
 
-func TestExecute_DeleteForwardNotFoundByTarget(t *testing.T) {
+func TestExecute_DeleteForwardNotFoundByName(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/v2/simulations" && r.Method == "GET":
@@ -144,7 +172,7 @@ func TestExecute_DeleteForwardNotFoundByTarget(t *testing.T) {
 		case r.URL.Path == "/v1/service" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
-				{"id":"svc-1","name":"forward-22->oob-mgmt-server:22","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
+				{"id":"svc-1","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
 			]`))
 		default:
 			http.NotFound(w, r)
@@ -157,34 +185,21 @@ func TestExecute_DeleteForwardNotFoundByTarget(t *testing.T) {
 	dc := NewCommand()
 	dc.APIEndpoint = server.URL
 	dc.ResourceType = "forward"
+	dc.ResourceName = "gpu-api"
 	dc.SimulationName = "lab-a"
-	dc.TargetNode = "node-gpu-1"
-	dc.TargetPort = 6443
 
 	err := dc.Execute()
-	if err == nil || !strings.Contains(err.Error(), "forward service not found for target node-gpu-1:6443") {
+	if err == nil || !strings.Contains(err.Error(), `forward service "gpu-api" not found`) {
 		t.Fatalf("expected forward not found error, got: %v", err)
 	}
 }
 
-func TestExecute_DeleteForwardRequiresTargetNode(t *testing.T) {
+func TestExecute_DeleteForwardRequiresName(t *testing.T) {
 	dc := NewCommand()
 	dc.ResourceType = "forward"
-	dc.TargetPort = 6443
 
 	err := dc.Execute()
-	if err == nil || !strings.Contains(err.Error(), "--target-node is required") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestExecute_DeleteForwardRequiresTargetPort(t *testing.T) {
-	dc := NewCommand()
-	dc.ResourceType = "forward"
-	dc.TargetNode = "node-gpu-1"
-
-	err := dc.Execute()
-	if err == nil || !strings.Contains(err.Error(), "--target-port must be between 1 and 65535") {
+	if err == nil || !strings.Contains(err.Error(), "forward name is required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -212,4 +227,21 @@ func setupConfig(t *testing.T, endpoint, bearer string, expiresAt time.Time) {
 	if _, err := os.Stat(filepath.Clean(path)); err != nil {
 		t.Fatalf("config file missing: %v", err)
 	}
+}
+
+func stubBastionExecution(t *testing.T, execFn func(cfg bastion.BastionExecConfig) (*bastion.ExecResult, error)) {
+	t.Helper()
+
+	oldKeyPathFn := defaultKeyPathFn
+	oldExecFn := execCommandOnBastionFn
+
+	defaultKeyPathFn = func() (string, error) {
+		return "/tmp/nvair-test-key", nil
+	}
+	execCommandOnBastionFn = execFn
+
+	t.Cleanup(func() {
+		defaultKeyPathFn = oldKeyPathFn
+		execCommandOnBastionFn = oldExecFn
+	})
 }
