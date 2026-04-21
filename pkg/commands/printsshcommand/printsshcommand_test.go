@@ -26,8 +26,8 @@ func TestPrintSSHCommand_AutoSelectSingleSimulation(t *testing.T) {
 		case "/v1/service":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
-				{"id":"svc-1","name":"forward-20000->node-gpu-1:22","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","node_name":"oob-mgmt-server"},
-				{"id":"svc-2","name":"forward-22->oob-mgmt-server:22","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","node_name":"oob-mgmt-server"}
+				{"id":"svc-1","name":"gpu-ssh","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","node_name":"oob-mgmt-server"},
+				{"id":"svc-2","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","node_name":"oob-mgmt-server"}
 			]`))
 		default:
 			http.NotFound(w, r)

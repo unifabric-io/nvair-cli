@@ -16,7 +16,6 @@ import (
 	"github.com/unifabric-io/nvair-cli/pkg/bastion"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
 	"github.com/unifabric-io/nvair-cli/pkg/constant"
-	forwardutil "github.com/unifabric-io/nvair-cli/pkg/forward"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
 	"github.com/unifabric-io/nvair-cli/pkg/node"
 	"github.com/unifabric-io/nvair-cli/pkg/output"
@@ -249,7 +248,6 @@ func (ec *Command) findSSHService(apiClient *api.Client, simulationID string) (s
 
 	for _, service := range services {
 		if strings.EqualFold(service.ServiceType, "ssh") &&
-			forwardutil.IsBastionSSHServiceName(service.Name) &&
 			service.Host != "" &&
 			service.SrcPort > 0 {
 			return service.Host, service.SrcPort, nil

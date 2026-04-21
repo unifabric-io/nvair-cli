@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	forwardutil "github.com/unifabric-io/nvair-cli/pkg/forward"
+	"github.com/unifabric-io/nvair-cli/pkg/constant"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
 	"github.com/unifabric-io/nvair-cli/pkg/topology"
 )
@@ -279,7 +279,7 @@ type EnableSSHResponse struct {
 }
 
 // CreateService creates a service for a simulation interface.
-// serviceName: the name of the service (e.g., "forward-22->oob-mgmt-server:22", "k8s-api-server")
+// serviceName: the name of the service (e.g., "bastion-ssh", "k8s-api-server")
 // destPort: the destination port on the target interface (e.g., 22 for SSH, 6443 for Kubernetes API)
 // serviceType: the type of service (e.g., "ssh", "kubernetes")
 // Returns the service details including the host and port information.
@@ -325,7 +325,7 @@ func (c *Client) CreateService(simulationID, interfaceID, serviceName string, de
 // CreateSSHService creates the default bastion SSH service for a simulation interface.
 // Returns the service details including the host and port information.
 func (c *Client) CreateSSHService(simulationID, interfaceID string) (*EnableSSHResponse, error) {
-	return c.CreateService(simulationID, interfaceID, forwardutil.BuildBastionSSHServiceName(), 22, "ssh")
+	return c.CreateService(simulationID, interfaceID, constant.DefaultBastionSSHServiceName, 22, "ssh")
 }
 
 // CreateKubernetesAPIService creates a Kubernetes API service for a simulation interface.

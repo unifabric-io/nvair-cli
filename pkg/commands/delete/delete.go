@@ -12,20 +12,28 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/unifabric-io/nvair-cli/pkg/api"
+	"github.com/unifabric-io/nvair-cli/pkg/bastion"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
+	"github.com/unifabric-io/nvair-cli/pkg/constant"
 	forwardutil "github.com/unifabric-io/nvair-cli/pkg/forward"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
 	"github.com/unifabric-io/nvair-cli/pkg/output"
 	"github.com/unifabric-io/nvair-cli/pkg/simulation"
+	sshpkg "github.com/unifabric-io/nvair-cli/pkg/ssh"
 )
+
+var (
+	defaultKeyPathFn       = sshpkg.DefaultKeyPath
+	execCommandOnBastionFn = bastion.ExecCommandOnBastion
+)
+
+const managedForwardListenPortStart = 20000
 
 // Command represents the delete subcommand.
 type Command struct {
 	ResourceType   string // "simulation" or "forward"
 	ResourceName   string
 	SimulationName string
-	TargetNode     string
-	TargetPort     int
 	APIEndpoint    string
 	Stderr         io.Writer
 	Verbose        bool
@@ -69,7 +77,7 @@ func (dc *Command) Execute() error {
 	logging.Verbose("Delete command started")
 
 	if dc.ResourceType == "" {
-		return fmt.Errorf("usage: nvair delete <simulation> <name> | nvair delete forward --target-node <name> --target-port <port> [-s <simulation>]")
+		return fmt.Errorf("usage: nvair delete <simulation> <name> | nvair delete forward <forward-name> [-s <simulation>]")
 	}
 
 	switch dc.ResourceType {
@@ -78,12 +86,9 @@ func (dc *Command) Execute() error {
 			return fmt.Errorf("usage: nvair delete <simulation> <name>")
 		}
 	case "forward":
-		dc.TargetNode = strings.TrimSpace(dc.TargetNode)
-		if dc.TargetNode == "" {
-			return output.NewValidationError("--target-node is required")
-		}
-		if dc.TargetPort <= 0 || dc.TargetPort > 65535 {
-			return output.NewValidationError("--target-port must be between 1 and 65535")
+		dc.ResourceName = strings.TrimSpace(dc.ResourceName)
+		if dc.ResourceName == "" {
+			return output.NewValidationError("forward name is required")
 		}
 	default:
 		return fmt.Errorf("invalid resource type: %s. Must be 'simulation' or 'forward'", dc.ResourceType)
@@ -93,7 +98,7 @@ func (dc *Command) Execute() error {
 	case "simulation":
 		logging.Verbose("Deleting %s: %s", dc.ResourceType, dc.ResourceName)
 	case "forward":
-		logging.Verbose("Deleting %s target: %s", dc.ResourceType, dc.forwardTarget())
+		logging.Verbose("Deleting %s: %s", dc.ResourceType, dc.ResourceName)
 	}
 
 	cfg, err := config.Load()
@@ -164,16 +169,15 @@ func (dc *Command) deleteForward(apiClient *api.Client) error {
 		return err
 	}
 
-	matches := make([]api.EnableSSHResponse, 0)
+	matches := make([]api.EnableSSHResponse, 0, 1)
 	for _, service := range services {
-		targetHost, targetPort := resolveForwardTarget(service)
-		if targetHost == dc.TargetNode && targetPort == dc.TargetPort {
+		if service.Name == dc.ResourceName {
 			matches = append(matches, service)
 		}
 	}
 
 	if len(matches) == 0 {
-		return output.NewNotFoundError(fmt.Sprintf("forward service not found for target %s", dc.forwardTarget()))
+		return output.NewNotFoundError(fmt.Sprintf("forward service %q not found", dc.ResourceName))
 	}
 
 	if len(matches) > 1 {
@@ -182,11 +186,14 @@ func (dc *Command) deleteForward(apiClient *api.Client) error {
 			descriptions = append(descriptions, fmt.Sprintf("%s (%s)", service.ID, service.Name))
 		}
 		return output.NewValidationError(
-			fmt.Sprintf("multiple forward services found for target %s: %s", dc.forwardTarget(), strings.Join(descriptions, ", ")),
+			fmt.Sprintf("multiple forward services found for name %q: %s", dc.ResourceName, strings.Join(descriptions, ", ")),
 		)
 	}
 
 	target := matches[0]
+	if err := dc.cleanupIPTables(services, target.DestPort); err != nil {
+		return err
+	}
 	if err := apiClient.DeleteServiceByID(target.ID); err != nil {
 		return err
 	}
@@ -202,17 +209,66 @@ func (dc *Command) errWriter() io.Writer {
 	return io.Discard
 }
 
-func (dc *Command) forwardTarget() string {
-	return net.JoinHostPort(dc.TargetNode, strconv.Itoa(dc.TargetPort))
+func (dc *Command) cleanupIPTables(services []api.EnableSSHResponse, listenPort int) error {
+	if listenPort < managedForwardListenPortStart {
+		return nil
+	}
+
+	result, err := dc.runCommandOnBastion(services, cleanupIPTablesScript(listenPort))
+	if err != nil {
+		return fmt.Errorf("failed to clean iptables rules for forward %q: %w", dc.ResourceName, err)
+	}
+	if result != nil && result.ExitCode != 0 {
+		return fmt.Errorf("failed to clean iptables rules for forward %q: exit code %d: %s", dc.ResourceName, result.ExitCode, result.Stderr)
+	}
+	return nil
 }
 
-func resolveForwardTarget(service api.EnableSSHResponse) (string, int) {
-	if parsed, ok := forwardutil.ParseServiceName(service.Name); ok {
-		return parsed.TargetHost, parsed.TargetPort
-	}
-	if forwardutil.IsBastionSSHServiceName(service.Name) {
-		return service.NodeName, 22
+func cleanupIPTablesScript(listenPort int) string {
+	comment := forwardutil.PortComment(listenPort)
+	return fmt.Sprintf(`set -euo pipefail
+comment='%s'
+delete_chain_rules() {
+  chain="$1"
+  sudo iptables -t nat -S "$chain" 2>/dev/null |
+    grep -F -- "$comment" |
+    sed -n "s/^-A $chain /-D $chain /p" |
+    while IFS= read -r delete_rule; do
+      [ -n "$delete_rule" ] && printf '%%s\n' "$delete_rule" | xargs -r sudo iptables -t nat || true
+    done || true
+}
+delete_chain_rules PREROUTING
+delete_chain_rules OUTPUT
+delete_chain_rules POSTROUTING`, comment)
+}
+
+func (dc *Command) runCommandOnBastion(services []api.EnableSSHResponse, command string) (*bastion.ExecResult, error) {
+	sshHost, sshPort, err := findSSHService(services)
+	if err != nil {
+		return nil, err
 	}
 
-	return service.NodeName, service.DestPort
+	keyPath, err := defaultKeyPathFn()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get SSH key path: %w", err)
+	}
+
+	cfg := bastion.BastionExecConfig{
+		BastionUser: constant.DefaultUbuntuUser,
+		BastionAddr: net.JoinHostPort(sshHost, strconv.Itoa(sshPort)),
+		BastionKey:  keyPath,
+		TargetUser:  constant.DefaultUbuntuUser,
+		Command:     command,
+	}
+
+	return execCommandOnBastionFn(cfg)
+}
+
+func findSSHService(services []api.EnableSSHResponse) (string, int, error) {
+	for _, svc := range services {
+		if strings.EqualFold(svc.ServiceType, "ssh") && svc.Host != "" && svc.SrcPort > 0 {
+			return svc.Host, svc.SrcPort, nil
+		}
+	}
+	return "", 0, fmt.Errorf("SSH service not found; run 'nvair create' first")
 }
