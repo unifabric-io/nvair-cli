@@ -20,10 +20,10 @@ import (
 func TestPrintSSHCommand_AutoSelectSingleSimulation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v2/simulations":
+		case "/v3/simulations":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
-		case "/v1/service":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","name":"lab-a","state":"RUNNING"}]}`))
+		case "/v3/simulations/nodes/interfaces/services/":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
 				{"id":"svc-1","name":"forward-20000->node-gpu-1:22","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","node_name":"oob-mgmt-server"},
@@ -35,7 +35,7 @@ func TestPrintSSHCommand_AutoSelectSingleSimulation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	homeDir := setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	homeDir := setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 	stdout, stderr, err := executePrintSSHCommandWithIO(t, []string{}, server.URL)
 	if err != nil {
 		t.Fatalf("execute failed: %v", err)
@@ -55,16 +55,16 @@ func TestPrintSSHCommand_AutoSelectSingleSimulation(t *testing.T) {
 
 func TestPrintSSHCommand_RequiresSimulationWhenMultipleExist(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/simulations" {
+		if r.URL.Path == "/v3/simulations" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"count":2,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"},{"id":"sim-2","title":"lab-b","state":"RUNNING"}]}`))
+			_, _ = w.Write([]byte(`{"count":2,"results":[{"id":"sim-1","name":"lab-a","state":"RUNNING"},{"id":"sim-2","name":"lab-b","state":"RUNNING"}]}`))
 			return
 		}
 		http.NotFound(w, r)
 	}))
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 	_, err := executePrintSSHCommand(t, []string{}, server.URL)
 	if err == nil || !strings.Contains(err.Error(), "--simulation <name> is required (2 simulations found)") {
 		t.Fatalf("expected missing simulation validation error, got: %v", err)
@@ -102,17 +102,15 @@ func executePrintSSHCommandWithIO(t *testing.T, args []string, endpoint string) 
 	return stdout.String(), stderr.String(), err
 }
 
-func setupConfig(t *testing.T, endpoint, bearer string, expiresAt time.Time) string {
+func setupConfig(t *testing.T, endpoint, apiToken string, _ time.Time) string {
 	t.Helper()
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 
 	cfg := &config.Config{
-		Username:             "user@example.com",
-		APIToken:             "api-token",
-		BearerToken:          bearer,
-		BearerTokenExpiresAt: expiresAt,
-		APIEndpoint:          endpoint,
+		Username:    "user@example.com",
+		APIToken:    apiToken,
+		APIEndpoint: endpoint,
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("failed to save config: %v", err)

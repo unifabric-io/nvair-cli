@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -27,7 +26,7 @@ type Command struct {
 // NewCommand creates a new print-ssh-command command.
 func NewCommand() *Command {
 	return &Command{
-		APIEndpoint: "https://air.nvidia.com/api",
+		APIEndpoint: api.DefaultBaseURL,
 	}
 }
 
@@ -79,30 +78,11 @@ func (pc *Command) configureVerbose() {
 
 func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config, error) {
 	cfg, err := config.Load()
-	if err != nil || cfg.BearerToken == "" {
+	if err != nil || cfg.APIToken == "" {
 		return nil, nil, fmt.Errorf("not authenticated. Please run 'nvair login' first")
 	}
 
-	if cfg.IsTokenExpired(time.Now()) {
-		if cfg.APIToken == "" {
-			return nil, nil, fmt.Errorf("authentication token has expired and no API token available. Please run 'nvair login' again")
-		}
-
-		refreshClient := api.NewClient(apiEndpoint, "")
-		newBearerToken, expiresAt, err := refreshClient.AuthLogin(cfg.Username, cfg.APIToken)
-		if err != nil {
-			return nil, nil, fmt.Errorf("authentication token expired and refresh failed: %w", err)
-		}
-
-		cfg.BearerToken = newBearerToken
-		cfg.BearerTokenExpiresAt = expiresAt
-		if err := cfg.Save(); err != nil {
-			logging.Verbose("Warning: Failed to save refreshed token: %v", err)
-			return nil, nil, fmt.Errorf("authentication token refreshed but failed to persist new token: %w", err)
-		}
-	}
-
-	return api.NewClient(apiEndpoint, cfg.BearerToken), cfg, nil
+	return api.NewClient(apiEndpoint, cfg.APIToken), cfg, nil
 }
 
 func (pc *Command) findSSHService(apiClient *api.Client, simulationID string) (string, int, error) {

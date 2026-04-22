@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/unifabric-io/nvair-cli/pkg/constant"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
@@ -12,16 +11,9 @@ import (
 
 // Config represents the local configuration stored on the user's machine.
 type Config struct {
-	Username             string    `json:"username"`
-	APIToken             string    `json:"apiToken"`
-	BearerToken          string    `json:"bearerToken"`
-	BearerTokenExpiresAt time.Time `json:"bearerTokenExpiresAt"`
-	APIEndpoint          string    `json:"apiEndpoint"`
-}
-
-// IsTokenExpired returns true if the bearer token has expired.
-func (c *Config) IsTokenExpired(now time.Time) bool {
-	return !c.BearerTokenExpiresAt.After(now)
+	Username    string `json:"username"`
+	APIToken    string `json:"apiToken"`
+	APIEndpoint string `json:"apiEndpoint"`
 }
 
 // ConfigPath returns the path to the config file.

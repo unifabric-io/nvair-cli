@@ -61,6 +61,9 @@ func TestIsBastionSSHServiceName(t *testing.T) {
 	if !IsBastionSSHServiceName("forward-ssh-22->oob-mgmt-server:22") {
 		t.Fatalf("expected legacy bastion ssh service name to be recognized")
 	}
+	if !IsBastionSSHServiceName("oob-mgmt-server SSH") {
+		t.Fatalf("expected current API bastion ssh service name to be recognized")
+	}
 	if IsBastionSSHServiceName("forward-20000->node-gpu-1:22") {
 		t.Fatalf("did not expect custom ssh forward to be treated as bastion ssh service")
 	}

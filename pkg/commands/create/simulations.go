@@ -18,7 +18,7 @@ func deleteDuplicateSimulations(apiClient *api.Client, topo *topology.RawTopolog
 
 	var duplicates []api.SimulationInfo
 	for _, sim := range existingSims {
-		if sim.Title == topo.Title {
+		if sim.Name == topo.Title {
 			duplicates = append(duplicates, sim)
 		}
 	}
@@ -35,7 +35,7 @@ func deleteDuplicateSimulations(apiClient *api.Client, topo *topology.RawTopolog
 		logging.Verbose("Deleting existing simulation with ID: %s", sim.ID)
 		if err := apiClient.DeleteSimulationByID(sim.ID); err != nil {
 			logging.Verbose("Failed to delete existing simulation %s: %v", sim.ID, err)
-			return fmt.Errorf("failed to delete existing simulation '%s': %w", sim.Title, err)
+			return fmt.Errorf("failed to delete existing simulation '%s': %w", sim.Name, err)
 		}
 	}
 

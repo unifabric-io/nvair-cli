@@ -95,6 +95,10 @@ func BuildBastionSSHServiceName() string {
 // IsBastionSSHServiceName reports whether the name identifies the default bastion SSH service.
 func IsBastionSSHServiceName(name string) bool {
 	name = strings.TrimSpace(name)
+	if strings.EqualFold(name, constant.OOBMgmtServerName+" SSH") {
+		return true
+	}
+
 	parsed, ok := ParseServiceName(name)
 	return ok &&
 		(parsed.ServiceType == "" || parsed.ServiceType == "ssh") &&

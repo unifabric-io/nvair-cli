@@ -48,7 +48,7 @@ func (lc *Command) Execute() error {
 
 	logging.Verbose("Config loaded successfully for user: %s", cfg.Username)
 
-	if cfg.Username == "" || cfg.BearerToken == "" {
+	if cfg.Username == "" || cfg.APIToken == "" {
 		logging.Verbose("No valid credentials found in config")
 		logging.Info("✓ Already logged out")
 		return nil

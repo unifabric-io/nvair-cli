@@ -7,8 +7,8 @@ This document defines all data structures, entities, and their relationships use
 
 ## JSON Naming Conventions
 
-- **Local Configuration Files** (stored on user's machine): Use **camelCase** (e.g., `bearerToken`, `apiEndpoint`)
-- **API Requests/Responses** (from nvair platform): Use **snake_case** (e.g., `bearer_token`, `api_endpoint`)
+- **Local Configuration Files** (stored on user's machine): Use **camelCase** (e.g., `apiToken`, `apiEndpoint`)
+- **API Requests/Responses** (from nvair platform): Use **snake_case** (e.g., `public_key`, `api_endpoint`)
 
 This follows common conventions:
 - Local files use JavaScript/TypeScript style (camelCase)
@@ -35,15 +35,9 @@ Represents authentication configuration stored on user's local machine.
 
 ```go
 type Configuration struct {
-    Username              string    `json:"username"`
-    APIToken              string    `json:"apiToken"`              // Platform API token for refresh
-    BearerToken           string    `json:"bearerToken"`
-    BearerTokenExpiresAt  time.Time `json:"bearerTokenExpiresAt"`
-    APIEndpoint           string    `json:"apiEndpoint"` // default: https://nvair.unifabric.io/api
-}
-
-func (c Configuration) IsTokenExpired(now time.Time) bool {
-    return !c.BearerTokenExpiresAt.After(now)
+    Username    string `json:"username"`
+    APIToken    string `json:"apiToken"`    // Platform API key used directly for authenticated requests
+    APIEndpoint string `json:"apiEndpoint"` // default: https://api.dsx-air.nvidia.com/api
 }
 ```
 
@@ -51,10 +45,8 @@ func (c Configuration) IsTokenExpired(now time.Time) bool {
 ```json
 {
   "username": "user@example.com",
-  "apiToken": "nvair_token_abc123...",
-  "bearerToken": "eyJhbGc...",
-  "bearerTokenExpiresAt": "2026-01-10T12:00:00Z",
-  "apiEndpoint": "https://nvair.unifabric.io/api"
+  "apiToken": "nvapi-abc123...",
+  "apiEndpoint": "https://api.dsx-air.nvidia.com/api"
 }
 ```
 

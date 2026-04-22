@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/unifabric-io/nvair-cli/pkg/config"
 )
@@ -16,11 +15,9 @@ func TestLogoutCommand_Execute_Success(t *testing.T) {
 	defer os.Setenv("HOME", oldHome)
 
 	cfg := &config.Config{
-		Username:             "test@example.com",
-		APIToken:             "test-token",
-		BearerToken:          "test-bearer",
-		BearerTokenExpiresAt: time.Now().Add(24 * time.Hour),
-		APIEndpoint:          "https://api.example.com",
+		Username:    "test@example.com",
+		APIToken:    "test-token",
+		APIEndpoint: "https://api.example.com",
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Failed to create test config: %v", err)
@@ -83,11 +80,9 @@ func TestLogoutCommand_NoConfirmationRequired(t *testing.T) {
 	defer os.Setenv("HOME", oldHome)
 
 	cfg := &config.Config{
-		Username:             "test@example.com",
-		APIToken:             "test-token",
-		BearerToken:          "test-bearer",
-		BearerTokenExpiresAt: time.Now().Add(24 * time.Hour),
-		APIEndpoint:          "https://api.example.com",
+		Username:    "test@example.com",
+		APIToken:    "test-token",
+		APIEndpoint: "https://api.example.com",
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Failed to create test config: %v", err)
@@ -115,11 +110,9 @@ func TestLogoutCommand_PreservesOtherUserData(t *testing.T) {
 	defer os.Setenv("HOME", oldHome)
 
 	cfg := &config.Config{
-		Username:             "test@example.com",
-		APIToken:             "test-token",
-		BearerToken:          "test-bearer",
-		BearerTokenExpiresAt: time.Now().Add(24 * time.Hour),
-		APIEndpoint:          "https://api.example.com",
+		Username:    "test@example.com",
+		APIToken:    "test-token",
+		APIEndpoint: "https://api.example.com",
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Failed to create test config: %v", err)

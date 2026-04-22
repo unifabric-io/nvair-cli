@@ -6,9 +6,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
-	"time"
 
-	"github.com/unifabric-io/nvair-cli/pkg/testutil"
+	"github.com/unifabric-io/nvair-cli/pkg/config"
 )
 
 func TestLoginCommand_FirstTimeLogin(t *testing.T) {
@@ -22,25 +21,21 @@ func TestLoginCommand_FirstTimeLogin(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", originalHome)
 
-	loginToken := testutil.MakeTestJWT(time.Now().Add(24 * time.Hour))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/login/":
-			resp := map[string]interface{}{
-				"result":  "OK",
-				"message": "Successfully logged in.",
-				"token":   loginToken,
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(resp)
+		case "/v3/login/":
+			t.Errorf("login endpoint should not be called when API key is used directly")
+			http.NotFound(w, r)
 
-		case "/v1/sshkey", "/v1/sshkey/":
+		case "/v3/users/ssh-keys", "/v3/users/ssh-keys/":
+			if got := r.Header.Get("Authorization"); got != "Bearer test-api-token" {
+				t.Errorf("Authorization header mismatch: got %q", got)
+			}
 			switch r.Method {
 			case http.MethodGet:
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("[]"))
+				w.Write([]byte(`{"count":0,"next":null,"previous":null,"results":[]}`))
 			case http.MethodPost:
 				resp := map[string]string{
 					"id":          "new-key-id",
@@ -67,6 +62,38 @@ func TestLoginCommand_FirstTimeLogin(t *testing.T) {
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Login failed: %v", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("failed to load saved config: %v", err)
+	}
+	if cfg.APIToken != "test-api-token" {
+		t.Fatalf("expected login key to be saved as api key, got %q", cfg.APIToken)
+	}
+	assertNoLegacyTokenFields(t)
+}
+
+func assertNoLegacyTokenFields(t *testing.T) {
+	t.Helper()
+
+	configPath, err := config.ConfigPath()
+	if err != nil {
+		t.Fatalf("failed to get config path: %v", err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read saved config: %v", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("failed to parse saved config: %v", err)
+	}
+	for _, field := range []string{"bearerToken", "bearerTokenExpiresAt"} {
+		if _, exists := raw[field]; exists {
+			t.Fatalf("legacy field %q should not be saved", field)
+		}
 	}
 }
 
@@ -148,7 +175,7 @@ func TestIsValidEmail(t *testing.T) {
 	}
 }
 
-func TestLoginCommand_TokenExpiry(t *testing.T) {
+func TestLoginCommand_DirectKeyHasNoTokenExchange(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "nvair-login-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -159,23 +186,17 @@ func TestLoginCommand_TokenExpiry(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", originalHome)
 
-	loginToken := testutil.MakeTestJWT(time.Now().Add(24 * time.Hour))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/login/":
-			resp := map[string]interface{}{
-				"result": "OK",
-				"token":  loginToken,
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(resp)
-		case "/v1/sshkey", "/v1/sshkey/":
+		case "/v3/login/":
+			t.Errorf("login endpoint should not be called when API key is used directly")
+			http.NotFound(w, r)
+		case "/v3/users/ssh-keys", "/v3/users/ssh-keys/":
 			switch r.Method {
 			case http.MethodGet:
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("[]"))
+				w.Write([]byte(`{"count":0,"next":null,"previous":null,"results":[]}`))
 			case http.MethodPost:
 				resp := map[string]string{
 					"id":          "new-key-id",
@@ -203,4 +224,13 @@ func TestLoginCommand_TokenExpiry(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Login should succeed: %v", err)
 	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("failed to load saved config: %v", err)
+	}
+	if cfg.APIToken != "test-api-token" {
+		t.Fatalf("expected direct API key to be saved as api key, got %q", cfg.APIToken)
+	}
+	assertNoLegacyTokenFields(t)
 }

@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,51 +17,40 @@ import (
 	"github.com/unifabric-io/nvair-cli/pkg/topology"
 )
 
-// Client represents an HTTP API client with bearer token authentication and retry logic.
+const (
+	DefaultBaseURL = "https://api.dsx-air.nvidia.com/api"
+
+	apiVersionPath = "/v3"
+
+	sshKeysEndpoint           = apiVersionPath + "/users/ssh-keys"
+	serviceEndpoint           = apiVersionPath + "/service"
+	servicesEndpoint          = apiVersionPath + "/services"
+	simulationEndpoint        = apiVersionPath + "/simulation"
+	simulationsEndpoint       = apiVersionPath + "/simulations"
+	simulationsImportEndpoint = simulationsEndpoint + "/import/"
+	imagesEndpoint            = apiVersionPath + "/images"
+	jobsEndpoint              = apiVersionPath + "/jobs"
+	nodesEndpoint             = simulationsEndpoint + "/nodes/"
+	nodeInterfacesEndpoint    = simulationsEndpoint + "/nodes/interfaces"
+	interfaceServicesEndpoint = nodeInterfacesEndpoint + "/services/"
+
+	DefaultSimulationsEndpoint = DefaultBaseURL + simulationsEndpoint
+)
+
+// Client represents an HTTP API client with API token authentication and retry logic.
 type Client struct {
-	baseURL     string
-	bearerToken string
-	httpClient  *http.Client
-	maxRetries  int
-}
-
-// TokenExpireTime parses a JWT token and extracts the expiration time from the exp claim.
-// Returns the expiration time or an error if the token is invalid.
-func TokenExpireTime(token string) (time.Time, error) {
-	if token == "" {
-		return time.Time{}, fmt.Errorf("token is empty")
-	}
-
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return time.Time{}, fmt.Errorf("invalid token format")
-	}
-
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to decode token payload: %w", err)
-	}
-
-	var claims struct {
-		Exp int64 `json:"exp"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return time.Time{}, fmt.Errorf("failed to unmarshal token claims: %w", err)
-	}
-
-	if claims.Exp <= 0 {
-		return time.Time{}, fmt.Errorf("invalid exp claim: %d", claims.Exp)
-	}
-
-	return time.Unix(claims.Exp, 0), nil
+	baseURL    string
+	apiToken   string
+	httpClient *http.Client
+	maxRetries int
 }
 
 // NewClient creates a new API client.
-// baseURL should be the base API endpoint (e.g., "https://air.nvidia.com/api")
-func NewClient(baseURL, bearerToken string) *Client {
+// baseURL should be the base API endpoint (e.g., DefaultBaseURL).
+func NewClient(baseURL, apiToken string) *Client {
 	return &Client{
-		baseURL:     baseURL,
-		bearerToken: bearerToken,
+		baseURL:  baseURL,
+		apiToken: apiToken,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -70,78 +58,29 @@ func NewClient(baseURL, bearerToken string) *Client {
 	}
 }
 
-// AuthLoginRequest represents the request body for POST /v1/login/.
-type AuthLoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-// AuthLoginResponse represents the response body for POST /v1/login/.
-type AuthLoginResponse struct {
-	Result  string `json:"result"`
-	Message string `json:"message"`
-	Token   string `json:"token"`
-}
-
-// AuthLogin exchanges username and API token for a bearer token.
-// Returns the bearer token and expiration time.
-func (c *Client) AuthLogin(username, apiToken string) (string, time.Time, error) {
-	logging.Verbose("AuthLogin: Starting authentication for user: %s", username)
-	logging.Verbose("AuthLogin: API endpoint: %s", c.baseURL)
-
-	reqBody := AuthLoginRequest{
-		Username: username,
-		Password: apiToken,
-	}
-
-	logging.Verbose("AuthLogin: Sending POST request to /v1/login/")
-	resp, err := c.doRequest("POST", "/v1/login/", &reqBody, false)
-	if err != nil {
-		logging.Verbose("AuthLogin: Request failed with error: %v", err)
-		return "", time.Time{}, err
-	}
-	defer resp.Body.Close()
-
-	// Check for errors
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		logging.Verbose("AuthLogin: Received status code %d with body: %s", resp.StatusCode, string(body))
-		return "", time.Time{}, fmt.Errorf("auth login failed: status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Decode response
-	var authResp AuthLoginResponse
-	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
-		logging.Verbose("AuthLogin: Failed to decode response: %v", err)
-		return "", time.Time{}, fmt.Errorf("failed to decode auth response: %w", err)
-	}
-
-	// Parse the JWT token to extract the actual expiration time
-	expiresAt, err := TokenExpireTime(authResp.Token)
-	if err != nil {
-		logging.Verbose("AuthLogin: Failed to parse token expiration: %v", err)
-		return "", time.Time{}, fmt.Errorf("failed to parse bearer token: %w", err)
-	}
-	logging.Verbose("AuthLogin: Successfully obtained bearer token, expires at: %s", expiresAt)
-
-	return authResp.Token, expiresAt, nil
-}
-
 // GetSSHKeyResponse represents a single SSH key object in the list response.
 type GetSSHKeyResponse struct {
+	Created     string `json:"created"`
 	ID          string `json:"id"`
-	URL         string `json:"url"`
-	Account     string `json:"account"`
 	Name        string `json:"name"`
 	Fingerprint string `json:"fingerprint"`
+}
+
+// listSSHKeysResponse represents the paginated response body for GET /v3/users/ssh-keys/.
+type listSSHKeysResponse struct {
+	Count    int                 `json:"count"`
+	Next     interface{}         `json:"next"`
+	Previous interface{}         `json:"previous"`
+	Results  []GetSSHKeyResponse `json:"results"`
 }
 
 // GetSSHKeys retrieves all SSH keys for the authenticated user.
 // Returns nil if no keys are found (200 OK with empty list).
 // Returns an error for non-2xx responses (including 404).
 func (c *Client) GetSSHKeys() ([]GetSSHKeyResponse, error) {
-	logging.Verbose("GetSSHKeys: Sending GET request to /v1/sshkey")
-	resp, err := c.doRequest("GET", "/v1/sshkey?ordering=-name", nil, true)
+	endpoint := sshKeysEndpoint + "/?limit="
+	logging.Verbose("GetSSHKeys: Sending GET request to %s", endpoint)
+	resp, err := c.doRequest("GET", endpoint, nil, true)
 	if err != nil {
 		logging.Verbose("GetSSHKeys: Request failed with error: %v", err)
 		return nil, err
@@ -161,28 +100,26 @@ func (c *Client) GetSSHKeys() ([]GetSSHKeyResponse, error) {
 		return nil, fmt.Errorf("get ssh keys failed: status %d: %s", resp.StatusCode, string(body))
 	}
 
-	// Decode response
-	var keys []GetSSHKeyResponse
-	if err := json.NewDecoder(resp.Body).Decode(&keys); err != nil {
+	var listResp listSSHKeysResponse
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
 		logging.Verbose("GetSSHKeys: Failed to decode response: %v", err)
 		return nil, fmt.Errorf("failed to decode ssh keys response: %w", err)
 	}
 
-	logging.Verbose("GetSSHKeys: Successfully retrieved %d SSH keys", len(keys))
-	return keys, nil
+	logging.Verbose("GetSSHKeys: Successfully retrieved %d SSH keys", len(listResp.Results))
+	return listResp.Results, nil
 }
 
-// CreateSSHKeyRequest represents the request body for POST /v1/sshkey.
+// CreateSSHKeyRequest represents the request body for POST /v3/users/ssh-keys/.
 type CreateSSHKeyRequest struct {
 	PublicKey string `json:"public_key"`
 	Name      string `json:"name"`
 }
 
-// CreateSSHKeyResponse represents the response body for POST /v1/sshkey.
+// CreateSSHKeyResponse represents the response body for POST /v3/users/ssh-keys/.
 type CreateSSHKeyResponse struct {
+	Created     string `json:"created"`
 	ID          string `json:"id"`
-	URL         string `json:"url"`
-	Account     string `json:"account"`
 	Name        string `json:"name"`
 	Fingerprint string `json:"fingerprint"`
 }
@@ -198,8 +135,9 @@ func (c *Client) CreateSSHKey(publicKey, name string) (*CreateSSHKeyResponse, er
 		Name:      name,
 	}
 
-	logging.Verbose("CreateSSHKey: Sending POST request to /v1/sshkey")
-	resp, err := c.doRequest("POST", "/v1/sshkey/", &reqBody, true)
+	endpoint := sshKeysEndpoint + "/"
+	logging.Verbose("CreateSSHKey: Sending POST request to %s", endpoint)
+	resp, err := c.doRequest("POST", endpoint, &reqBody, true)
 	if err != nil {
 		logging.Verbose("CreateSSHKey: Request failed with error: %v", err)
 		return nil, err
@@ -242,8 +180,9 @@ func (c *Client) CreateSSHKey(publicKey, name string) (*CreateSSHKeyResponse, er
 func (c *Client) DeleteSSHKey(keyID string) error {
 	logging.Verbose("DeleteSSHKey: Starting SSH key deletion for key ID: %s", keyID)
 
-	logging.Verbose("DeleteSSHKey: Sending DELETE request to /v1/sshkey/%s", keyID)
-	resp, err := c.doRequest("DELETE", fmt.Sprintf("/v1/sshkey/%s/", keyID), nil, true)
+	endpoint := fmt.Sprintf("%s/%s/", sshKeysEndpoint, keyID)
+	logging.Verbose("DeleteSSHKey: Sending DELETE request to %s", endpoint)
+	resp, err := c.doRequest("DELETE", endpoint, nil, true)
 	if err != nil {
 		logging.Verbose("DeleteSSHKey: Request failed with error: %v", err)
 		return err
@@ -261,21 +200,45 @@ func (c *Client) DeleteSSHKey(keyID string) error {
 	return nil
 }
 
-// EnableSSHResponse represents the response body for POST /v1/service/
+// EnableSSHResponse represents a service/forward response.
 type EnableSSHResponse struct {
 	URL               string `json:"url"`
 	ID                string `json:"id"`
+	Created           string `json:"created"`
+	Modified          string `json:"modified"`
 	Name              string `json:"name"`
 	Simulation        string `json:"simulation"`
 	Interface         string `json:"interface"`
 	DestPort          int    `json:"dest_port"`
 	SrcPort           int    `json:"src_port"`
+	NodePort          int    `json:"node_port"`
+	WorkerPort        int    `json:"worker_port"`
+	WorkerFQDN        string `json:"worker_fqdn"`
 	Link              string `json:"link"`
 	ServiceType       string `json:"service_type"`
 	NodeName          string `json:"node_name"`
 	InterfaceName     string `json:"interface_name"`
 	Host              string `json:"host"`
 	OSDefaultUsername string `json:"os_default_username"`
+}
+
+func (s *EnableSSHResponse) normalize() {
+	if s.DestPort == 0 {
+		s.DestPort = s.NodePort
+	}
+	if s.SrcPort == 0 {
+		s.SrcPort = s.WorkerPort
+	}
+	if s.Host == "" {
+		s.Host = s.WorkerFQDN
+	}
+}
+
+type listServicesResponse struct {
+	Count    int                 `json:"count"`
+	Next     interface{}         `json:"next"`
+	Previous interface{}         `json:"previous"`
+	Results  []EnableSSHResponse `json:"results"`
 }
 
 // CreateService creates a service for a simulation interface.
@@ -294,8 +257,9 @@ func (c *Client) CreateService(simulationID, interfaceID, serviceName string, de
 		"service_type": serviceType,
 	}
 
-	logging.Verbose("CreateService: Sending POST request to /v1/service/")
-	resp, err := c.doRequest("POST", "/v1/service/", &reqBody, true)
+	endpoint := serviceEndpoint + "/"
+	logging.Verbose("CreateService: Sending POST request to %s", endpoint)
+	resp, err := c.doRequest("POST", endpoint, &reqBody, true)
 	if err != nil {
 		logging.Verbose("CreateService: Request failed with error: %v", err)
 		return nil, err
@@ -317,6 +281,7 @@ func (c *Client) CreateService(simulationID, interfaceID, serviceName string, de
 		logging.Verbose("CreateService: Failed to decode response: %v", err)
 		return nil, fmt.Errorf("failed to decode create %s service response: %w", serviceType, err)
 	}
+	svcResp.normalize()
 
 	logging.Verbose("CreateService: Successfully created %s service with ID: %s, SrcPort: %d, Host: %s", serviceType, svcResp.ID, svcResp.SrcPort, svcResp.Host)
 	return &svcResp, nil
@@ -334,13 +299,14 @@ func (c *Client) CreateKubernetesAPIService(simulationID, interfaceID string) (*
 	return c.CreateService(simulationID, interfaceID, "k8s-api-server", 6443, "other")
 }
 
-// GetServices lists services for a simulation.
+// GetServices lists interface services for a simulation.
 func (c *Client) GetServices(simulationID string) ([]EnableSSHResponse, error) {
 	logging.Verbose("GetServices: Fetching services for simulation: %s", simulationID)
 
 	query := url.Values{}
 	query.Set("simulation", simulationID)
-	path := fmt.Sprintf("/v1/service?%s", query.Encode())
+	query.Set("limit", "25")
+	path := fmt.Sprintf("%s?%s", interfaceServicesEndpoint, query.Encode())
 
 	resp, err := c.doRequest("GET", path, nil, true)
 	if err != nil {
@@ -356,18 +322,29 @@ func (c *Client) GetServices(simulationID string) ([]EnableSSHResponse, error) {
 		return nil, fmt.Errorf("get services failed: status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var services []EnableSSHResponse
-	if err := json.Unmarshal(bodyBytes, &services); err != nil {
-		logging.Verbose("GetServices: Failed to decode response: %v", err)
-		return nil, fmt.Errorf("failed to decode get services response: %w", err)
+	var listResp listServicesResponse
+	if err := json.Unmarshal(bodyBytes, &listResp); err != nil {
+		var services []EnableSSHResponse
+		if arrayErr := json.Unmarshal(bodyBytes, &services); arrayErr != nil {
+			logging.Verbose("GetServices: Failed to decode response: %v", err)
+			return nil, fmt.Errorf("failed to decode get services response: %w", err)
+		}
+		for i := range services {
+			services[i].normalize()
+		}
+		logging.Verbose("GetServices: Successfully retrieved %d services", len(services))
+		return services, nil
 	}
 
-	logging.Verbose("GetServices: Successfully retrieved %d services", len(services))
-	return services, nil
+	for i := range listResp.Results {
+		listResp.Results[i].normalize()
+	}
+	logging.Verbose("GetServices: Successfully retrieved %d services", len(listResp.Results))
+	return listResp.Results, nil
 }
 
-// doRequest performs an HTTP request with retry logic and bearer token injection.
-// useAuth determines whether to include the bearer token in the Authorization header.
+// doRequest performs an HTTP request with retry logic and Authorization header injection.
+// useAuth determines whether to include the API token in the Authorization header.
 func (c *Client) doRequest(method, path string, body interface{}, useAuth bool) (*http.Response, error) {
 	// Retry logic
 	var lastErr error
@@ -391,14 +368,14 @@ func (c *Client) doRequest(method, path string, body interface{}, useAuth bool) 
 
 		// Set headers
 		req.Header.Set("Content-Type", "application/json")
-		if useAuth && c.bearerToken != "" {
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.bearerToken))
+		if useAuth && c.apiToken != "" {
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiToken))
 			// Log truncated token for security
-			truncatedToken := c.bearerToken
+			truncatedToken := c.apiToken
 			if len(truncatedToken) > 20 {
 				truncatedToken = truncatedToken[:20] + "..."
 			}
-			logging.Verbose("doRequest: Bearer token header set with token: %s", truncatedToken)
+			logging.Verbose("doRequest: Authorization header set with API token: %s", truncatedToken)
 		}
 
 		// Perform the request
@@ -444,12 +421,12 @@ func (c *Client) doRequest(method, path string, body interface{}, useAuth bool) 
 	return nil, lastErr
 }
 
-// CreateSimulationRequest represents the request body for POST /v1/simulations
+// CreateSimulationRequest represents the request body for POST /v3/simulations
 type CreateSimulationRequest struct {
 	Topology interface{} `json:"topology"`
 }
 
-// CreateSimulationResponse represents the response body for POST /v2/simulations/import/
+// CreateSimulationResponse represents the response body for POST /v3/simulations/import/
 type CreateSimulationResponse struct {
 	ID               string      `json:"id"`
 	Title            string      `json:"title"`
@@ -463,8 +440,8 @@ func (c *Client) CreateSimulation(topo *topology.RawTopology) (*CreateSimulation
 
 	reqBody := topo
 
-	logging.Verbose("CreateSimulation: Sending POST request to /api/v2/simulations/import/")
-	resp, err := c.doRequest("POST", "/v2/simulations/import/", &reqBody, true)
+	logging.Verbose("CreateSimulation: Sending POST request to %s", simulationsImportEndpoint)
+	resp, err := c.doRequest("POST", simulationsImportEndpoint, &reqBody, true)
 	if err != nil {
 		logging.Verbose("CreateSimulation: Request failed with error: %v", err)
 		return nil, err
@@ -491,7 +468,7 @@ func (c *Client) CreateSimulation(topo *topology.RawTopology) (*CreateSimulation
 	return &simResp, nil
 }
 
-// ControlSimulationResponse represents the response body for POST /v1/simulation/{id}/control/
+// ControlSimulationResponse represents the response body for POST /v3/simulation/{id}/control/
 type ControlSimulationResponse struct {
 	Result string   `json:"result"`
 	Jobs   []string `json:"jobs"`
@@ -507,7 +484,7 @@ func (c *Client) ControlSimulation(simulationID, state string) (*ControlSimulati
 		return nil, fmt.Errorf("failed to marshal control request: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("/v1/simulation/%s/control/", simulationID)
+	endpoint := fmt.Sprintf("%s/%s/control/", simulationEndpoint, simulationID)
 	logging.Verbose("ControlSimulation: Sending POST request to %s with payload: %s", endpoint, string(payload))
 
 	resp, err := c.doRequest("POST", endpoint, map[string]string{"action": state}, true)
@@ -540,12 +517,12 @@ func (c *Client) ControlSimulation(simulationID, state string) (*ControlSimulati
 // SimulationInfo represents a single simulation in the list response
 type SimulationInfo struct {
 	ID      string `json:"id"`
-	Title   string `json:"title"`
+	Name    string `json:"name"`
 	State   string `json:"state"`
 	Created string `json:"created"`
 }
 
-// ListSimulationsResponse represents the response body for GET /v2/simulations
+// ListSimulationsResponse represents the response body for GET /v3/simulations
 type ListSimulationsResponse struct {
 	Count    int              `json:"count"`
 	Next     interface{}      `json:"next"`
@@ -553,13 +530,13 @@ type ListSimulationsResponse struct {
 	Results  []SimulationInfo `json:"results"`
 }
 
-// ImageInfo represents a single image returned by GET /v2/images.
+// ImageInfo represents a single image returned by GET /v3/images.
 type ImageInfo struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
-// ListImagesResponse represents the response body for GET /v2/images.
+// ListImagesResponse represents the response body for GET /v3/images.
 type ListImagesResponse struct {
 	Count    int         `json:"count"`
 	Next     interface{} `json:"next"`
@@ -572,7 +549,7 @@ func (c *Client) GetImages() ([]ImageInfo, error) {
 	query := url.Values{}
 	query.Set("limit", strconv.FormatInt(math.MaxInt64, 10))
 
-	path := fmt.Sprintf("/v2/images?%s", query.Encode())
+	path := fmt.Sprintf("%s?%s", imagesEndpoint, query.Encode())
 	logging.Verbose("GetImages: Sending GET request to %s", path)
 	resp, err := c.doRequest("GET", path, nil, true)
 	if err != nil {
@@ -600,8 +577,8 @@ func (c *Client) GetImages() ([]ImageInfo, error) {
 
 // GetSimulations retrieves all simulations for the authenticated user
 func (c *Client) GetSimulations() ([]SimulationInfo, error) {
-	logging.Verbose("GetSimulations: Sending GET request to /v2/simulations")
-	resp, err := c.doRequest("GET", "/v2/simulations", nil, true)
+	logging.Verbose("GetSimulations: Sending GET request to %s", simulationsEndpoint)
+	resp, err := c.doRequest("GET", simulationsEndpoint, nil, true)
 	if err != nil {
 		logging.Verbose("GetSimulations: Request failed with error: %v", err)
 		return nil, err
@@ -629,7 +606,7 @@ func (c *Client) GetSimulations() ([]SimulationInfo, error) {
 }
 
 // DeleteSimulation deletes a simulation by name
-// It first retrieves all simulations, finds the one matching the given name (title),
+// It first retrieves all simulations, finds the one matching the given name,
 // and then deletes it using its ID.
 func (c *Client) DeleteSimulation(name string) error {
 	logging.Verbose("DeleteSimulation: Starting deletion of simulation: %s", name)
@@ -641,17 +618,17 @@ func (c *Client) DeleteSimulation(name string) error {
 		return fmt.Errorf("failed to list simulations: %w", err)
 	}
 
-	// Find the simulation with matching title
+	// Find the simulation with matching name
 	var simulationID string
 	for _, sim := range simulations {
-		if sim.Title == name {
+		if sim.Name == name {
 			simulationID = sim.ID
 			break
 		}
 	}
 
 	if simulationID == "" {
-		logging.Verbose("DeleteSimulation: Simulation with title '%s' not found", name)
+		logging.Verbose("DeleteSimulation: Simulation with name '%s' not found", name)
 		return fmt.Errorf("simulation '%s' not found", name)
 	}
 
@@ -671,7 +648,7 @@ func (c *Client) DeleteSimulation(name string) error {
 func (c *Client) DeleteSimulationByID(simulationID string) error {
 	logging.Verbose("DeleteSimulationByID: Starting deletion of simulation ID: %s", simulationID)
 
-	endpoint := fmt.Sprintf("/v2/simulations/%s/", simulationID)
+	endpoint := fmt.Sprintf("%s/%s/", simulationsEndpoint, simulationID)
 	logging.Verbose("DeleteSimulationByID: Sending DELETE request to %s", endpoint)
 
 	resp, err := c.doRequest("DELETE", endpoint, nil, true)
@@ -698,7 +675,7 @@ func (c *Client) DeleteSimulationByID(simulationID string) error {
 func (c *Client) DeleteService(name string) error {
 	logging.Verbose("DeleteService: Starting deletion of service: %s", name)
 
-	endpoint := fmt.Sprintf("/v1/services/%s", name)
+	endpoint := fmt.Sprintf("%s/%s", servicesEndpoint, name)
 	logging.Verbose("DeleteService: Sending DELETE request to %s", endpoint)
 
 	resp, err := c.doRequest("DELETE", endpoint, nil, true)
@@ -731,7 +708,7 @@ func (c *Client) DeleteService(name string) error {
 func (c *Client) DeleteServiceByID(serviceID string) error {
 	logging.Verbose("DeleteServiceByID: Starting deletion of service ID: %s", serviceID)
 
-	endpoint := fmt.Sprintf("/v1/service/%s/", serviceID)
+	endpoint := fmt.Sprintf("%s/%s/", serviceEndpoint, serviceID)
 	logging.Verbose("DeleteServiceByID: Sending DELETE request to %s", endpoint)
 
 	resp, err := c.doRequest("DELETE", endpoint, nil, true)
@@ -771,7 +748,7 @@ type Job struct {
 func (c *Client) GetJob(jobID string) (*Job, error) {
 	logging.Verbose("GetJob: Fetching job status for job ID: %s", jobID)
 
-	endpoint := fmt.Sprintf("/v2/jobs/%s", jobID)
+	endpoint := fmt.Sprintf("%s/%s", jobsEndpoint, jobID)
 	resp, err := c.doRequest("GET", endpoint, nil, true)
 	if err != nil {
 		logging.Verbose("GetJob: Request failed with error: %v", err)
@@ -810,7 +787,7 @@ type Node struct {
 	Simulation string `json:"simulation"`
 }
 
-// nodeListResponse represents the response body for GET /v2/simulations/nodes/
+// nodeListResponse represents the response body for GET /v3/simulations/nodes/
 type nodeListResponse struct {
 	Results []Node `json:"results"`
 }
@@ -837,7 +814,7 @@ func (c *Client) GetNodes(simulationID string) ([]Node, error) {
 	query.Set("ordering", "os")
 	query.Set("limit", strconv.FormatInt(math.MaxInt64, 10))
 
-	path := fmt.Sprintf("/v2/simulations/nodes/?%s", query.Encode())
+	path := fmt.Sprintf("%s?%s", nodesEndpoint, query.Encode())
 	resp, err := c.doRequest("GET", path, nil, true)
 	if err != nil {
 		logging.Verbose("GetNodes: Request failed with error: %v", err)
@@ -890,7 +867,7 @@ func (c *Client) GetAllNodes() ([]Node, error) {
 	query.Set("ordering", "os")
 	query.Set("limit", strconv.FormatInt(math.MaxInt64, 10))
 
-	path := fmt.Sprintf("/v2/simulations/nodes/?%s", query.Encode())
+	path := fmt.Sprintf("%s?%s", nodesEndpoint, query.Encode())
 	resp, err := c.doRequest("GET", path, nil, true)
 	if err != nil {
 		logging.Verbose("GetAllNodes: Request failed with error: %v", err)
@@ -948,7 +925,7 @@ type Interface struct {
 	Link          string `json:"link"`
 }
 
-// interfaceListResponse represents the response body for GET /v2/simulations/nodes/interfaces
+// interfaceListResponse represents the response body for GET /v3/simulations/nodes/interfaces
 type interfaceListResponse struct {
 	Results []Interface `json:"results"`
 }
@@ -957,7 +934,7 @@ type interfaceListResponse struct {
 func (c *Client) GetNodeInterfaces(simulationID, nodeID string) ([]Interface, error) {
 	logging.Verbose("GetNodeInterfaces: Fetching interfaces for node %s in simulation %s", nodeID, simulationID)
 
-	endpoint := fmt.Sprintf("/v2/simulations/nodes/interfaces?simulation=%s&node=%s", simulationID, nodeID)
+	endpoint := fmt.Sprintf("%s?simulation=%s&node=%s", nodeInterfacesEndpoint, simulationID, nodeID)
 	resp, err := c.doRequest("GET", endpoint, nil, true)
 	if err != nil {
 		logging.Verbose("GetNodeInterfaces: Request failed with error: %v", err)

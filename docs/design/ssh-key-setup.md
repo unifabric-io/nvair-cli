@@ -18,14 +18,13 @@ nvair login -u user@example.com -p api-token
     │       ├─> NO: Generate Ed25519 key pair
     │       └─> YES: Use existing key pair
     │
-    ├─> 2. Authenticate with username + API token
-    │       └─> Get bearer token
+    ├─> 2. Use provided API token directly for authenticated requests
     │
-    ├─> 3. GET /v1/sshkey
+    ├─> 3. GET /v3/users/ssh-keys/
     │       └─> Check if key with name "nvair.unifabric.io-cli" and matching fingerprint exists
     │
     └─> 4. If public key not found:
-            └─> POST /v1/sshkey
+            └─> POST /v3/users/ssh-keys/
                 └─> Upload public key with name "nvair.unifabric.io-cli"
 ```
 
@@ -133,9 +132,9 @@ Output format: `SHA256:abc123def456...`
 ### Step 4: Check if Key Exists in Account
 
 ```go
-func publicKeyExistsInAccount(client *http.Client, bearerToken, fingerprint, apiEndpoint string) (bool, error) {
-    req, _ := http.NewRequest("GET", apiEndpoint+"/v1/sshkey", nil)
-    req.Header.Set("Authorization", "Bearer "+bearerToken)
+func publicKeyExistsInAccount(client *http.Client, apiToken, fingerprint, apiEndpoint string) (bool, error) {
+    req, _ := http.NewRequest("GET", apiEndpoint+"/v3/users/ssh-keys/", nil)
+    req.Header.Set("Authorization", "Bearer "+apiToken)
 
     resp, err := client.Do(req)
     if err != nil {
@@ -165,7 +164,7 @@ func publicKeyExistsInAccount(client *http.Client, bearerToken, fingerprint, api
 ### Step 5: Upload Public Key
 
 ```go
-func uploadPublicKey(client *http.Client, bearerToken, publicKeyPath, apiEndpoint string) error {
+func uploadPublicKey(client *http.Client, apiToken, publicKeyPath, apiEndpoint string) error {
     pubKeyBytes, err := os.ReadFile(publicKeyPath)
     if err != nil {
         return err
@@ -179,9 +178,9 @@ func uploadPublicKey(client *http.Client, bearerToken, publicKeyPath, apiEndpoin
     payloadBytes, _ := json.Marshal(payload)
 
     req, _ := http.NewRequest("POST", 
-        apiEndpoint+"/v1/sshkey", 
+        apiEndpoint+"/v3/users/ssh-keys/", 
         bytes.NewBuffer(payloadBytes))
-    req.Header.Set("Authorization", "Bearer "+bearerToken)
+    req.Header.Set("Authorization", "Bearer "+apiToken)
     req.Header.Set("Content-Type", "application/json")
 
     resp, err := client.Do(req)
@@ -222,11 +221,7 @@ func Login(username, apiToken string) error {
         fmt.Println("✓ Using existing SSH key pair")
     }
 
-    // 2. Authenticate and get bearer token
-    bearerToken, expiresAt, err := authenticate(username, apiToken)
-    if err != nil {
-        return fmt.Errorf("authentication failed: %w", err)
-    }
+    // 2. Use the provided API token directly for authenticated requests.
 
     // 3. Check if public key exists in account
     fingerprint, err := calculateFingerprint(publicKeyPath)
@@ -234,7 +229,7 @@ func Login(username, apiToken string) error {
         return fmt.Errorf("calculate fingerprint: %w", err)
     }
 
-    exists, err := publicKeyExistsInAccount(httpClient, bearerToken, fingerprint, apiEndpoint)
+    exists, err := publicKeyExistsInAccount(httpClient, apiToken, fingerprint, apiEndpoint)
     if err != nil {
         return fmt.Errorf("check public key: %w", err)
     }
@@ -242,7 +237,7 @@ func Login(username, apiToken string) error {
     // 4. Upload public key if not found
     if !exists {
         fmt.Println("Uploading public key to nvidia account...")
-        if err := uploadPublicKey(httpClient, bearerToken, publicKeyPath, apiEndpoint); err != nil {
+        if err := uploadPublicKey(httpClient, apiToken, publicKeyPath, apiEndpoint); err != nil {
             return fmt.Errorf("upload public key: %w", err)
         }
         fmt.Printf("✓ Public key uploaded (fingerprint: %s)\n", fingerprint)
@@ -252,10 +247,9 @@ func Login(username, apiToken string) error {
 
     // 5. Save configuration
     config := Configuration{
-        Username:             username,
-        APIToken:             apiToken,
-        BearerToken:          bearerToken,
-        BearerTokenExpiresAt: expiresAt,
+        Username:    username,
+        APIToken:    apiToken,
+        APIEndpoint: apiEndpoint,
     }
 
     if err := saveConfig(config); err != nil {

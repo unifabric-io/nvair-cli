@@ -56,7 +56,7 @@ type NodeView struct {
 // SimulationSummary is the enriched view of a simulation used in `get simulations` output.
 type SimulationSummary struct {
 	ID      string    `json:"id"      yaml:"id"`
-	Title   string    `json:"title"   yaml:"title"`
+	Name    string    `json:"name"    yaml:"name"`
 	State   string    `json:"state"   yaml:"state"`
 	Created string    `json:"created" yaml:"created"`
 	Count   NodeCount `json:"count"   yaml:"count"`
@@ -87,7 +87,7 @@ type Command struct {
 
 // NewCommand creates a new get command with defaults.
 func NewCommand() *Command {
-	return &Command{APIEndpoint: "https://air.nvidia.com/api"}
+	return &Command{APIEndpoint: api.DefaultBaseURL}
 }
 
 // Register registers get subcommands and flags.
@@ -271,7 +271,7 @@ func renderSimulationOutput(w io.Writer, summaries []SimulationSummary, format s
 				created = t.Local().Format("2006-01-02 15:04:05")
 			}
 			rows = append(rows, []string{
-				s.Title,
+				s.Name,
 				s.State,
 				created,
 				s.ID,
@@ -318,7 +318,7 @@ func buildSimulationSummaries(simulations []api.SimulationInfo, allNodes []api.N
 		}
 		summaries = append(summaries, SimulationSummary{
 			ID:      sim.ID,
-			Title:   sim.Title,
+			Name:    sim.Name,
 			State:   sim.State,
 			Created: sim.Created,
 			Count:   *counts,
@@ -560,28 +560,9 @@ func writeYAML(w io.Writer, v interface{}) error {
 
 func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config, error) {
 	cfg, err := config.Load()
-	if err != nil || cfg.BearerToken == "" {
+	if err != nil || cfg.APIToken == "" {
 		return nil, nil, fmt.Errorf("not authenticated. Please run 'nvair login' first")
 	}
 
-	if cfg.IsTokenExpired(time.Now()) {
-		if cfg.APIToken == "" {
-			return nil, nil, fmt.Errorf("authentication token has expired and no API token available. Please run 'nvair login' again")
-		}
-
-		refreshClient := api.NewClient(apiEndpoint, "")
-		newBearerToken, expiresAt, err := refreshClient.AuthLogin(cfg.Username, cfg.APIToken)
-		if err != nil {
-			return nil, nil, fmt.Errorf("authentication token expired and refresh failed: %w", err)
-		}
-
-		cfg.BearerToken = newBearerToken
-		cfg.BearerTokenExpiresAt = expiresAt
-		if err := cfg.Save(); err != nil {
-			logging.Verbose("Warning: Failed to save refreshed token: %v", err)
-			return nil, nil, fmt.Errorf("authentication token refreshed but failed to persist new token: %w", err)
-		}
-	}
-
-	return api.NewClient(apiEndpoint, cfg.BearerToken), cfg, nil
+	return api.NewClient(apiEndpoint, cfg.APIToken), cfg, nil
 }

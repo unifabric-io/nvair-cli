@@ -6,10 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/unifabric-io/nvair-cli/pkg/api"
-	"github.com/unifabric-io/nvair-cli/pkg/config"
 	"github.com/unifabric-io/nvair-cli/pkg/topology"
 )
 
@@ -61,63 +59,6 @@ func TestTopologyLoading_Integration(t *testing.T) {
 
 	if len(topo.Content.Nodes) == 0 {
 		t.Errorf("Expected at least one node in content")
-	}
-}
-
-func TestConfiguration_TokenExpired(t *testing.T) {
-	expiredCfg := &config.Config{
-		Username:             "test@example.com",
-		BearerToken:          "test-token",
-		BearerTokenExpiresAt: time.Now().Add(-1 * time.Hour),
-	}
-
-	if !expiredCfg.IsTokenExpired(time.Now()) {
-		t.Errorf("Expected token to be expired")
-	}
-
-	validCfg := &config.Config{
-		Username:             "test@example.com",
-		BearerToken:          "test-token",
-		BearerTokenExpiresAt: time.Now().Add(23 * time.Hour),
-	}
-
-	if validCfg.IsTokenExpired(time.Now()) {
-		t.Errorf("Expected token to be valid")
-	}
-}
-
-func TestConfiguration_TokenRefreshScenario(t *testing.T) {
-	expiredCfg := &config.Config{
-		Username:             "test@example.com",
-		APIToken:             "saved-api-token",
-		BearerToken:          "old-bearer-token",
-		BearerTokenExpiresAt: time.Now().Add(-1 * time.Hour),
-	}
-
-	if !expiredCfg.IsTokenExpired(time.Now()) {
-		t.Fatalf("Test setup error: token should be expired")
-	}
-
-	if expiredCfg.APIToken == "" {
-		t.Errorf("Expected API token to be set for refresh")
-	}
-
-	if expiredCfg.Username == "" {
-		t.Errorf("Expected username to be set for refresh")
-	}
-
-	newBearerToken := "new-bearer-token"
-	newExpiresAt := time.Now().Add(24 * time.Hour)
-
-	expiredCfg.BearerToken = newBearerToken
-	expiredCfg.BearerTokenExpiresAt = newExpiresAt
-
-	if expiredCfg.IsTokenExpired(time.Now()) {
-		t.Errorf("Expected token to be valid after refresh")
-	}
-
-	if expiredCfg.BearerToken != newBearerToken {
-		t.Errorf("Expected bearer token to be updated")
 	}
 }
 

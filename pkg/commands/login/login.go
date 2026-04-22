@@ -26,7 +26,7 @@ type Command struct {
 // NewCommand creates a new login command.
 func NewCommand() *Command {
 	return &Command{
-		APIEndpoint: "https://air.nvidia.com/api",
+		APIEndpoint: api.DefaultBaseURL,
 		KeyName:     "nvair-cli",
 	}
 }
@@ -35,7 +35,7 @@ func NewCommand() *Command {
 func (lc *Command) Register(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	flags.StringVarP(&lc.Username, "user", "u", lc.Username, "Username/Email (required)")
-	flags.StringVarP(&lc.APIToken, "password", "p", lc.APIToken, "API token (required)")
+	flags.StringVarP(&lc.APIToken, "password", "p", lc.APIToken, "API key (required)")
 	flags.StringVar(&lc.APIEndpoint, "api-endpoint", lc.APIEndpoint, "API endpoint URL")
 	flags.StringVar(&lc.KeyName, "key-name", lc.KeyName, "SSH key name to use for authentication")
 }
@@ -56,14 +56,7 @@ func (lc *Command) Execute() error {
 
 	logging.Verbose("Flags validated successfully")
 
-	logging.Verbose("Step 1/6: Authenticating with API endpoint: %s", lc.APIEndpoint)
-	apiClient := api.NewClient(lc.APIEndpoint, "")
-	bearerToken, expiresAt, err := apiClient.AuthLogin(lc.Username, lc.APIToken)
-	if err != nil {
-		logging.Verbose("Authentication failed: %v", err)
-		return output.NewAuthError("Authentication failed", err)
-	}
-	logging.Verbose("Authentication successful, bearer token obtained, expires at: %s", expiresAt)
+	logging.Verbose("Step 1/6: Using provided API key directly with API endpoint: %s", lc.APIEndpoint)
 
 	logging.Verbose("Step 2/6: Ensuring SSH key pair exists")
 	keyPath, err := ssh.DefaultKeyPath()
@@ -81,7 +74,7 @@ func (lc *Command) Execute() error {
 	logging.Verbose("SSH key pair ready, fingerprint: %s", kp.Fingerprint)
 
 	logging.Verbose("Step 3/6: Creating authenticated API client for SSH key operations")
-	authClient := api.NewClient(lc.APIEndpoint, bearerToken)
+	authClient := api.NewClient(lc.APIEndpoint, lc.APIToken)
 
 	logging.Verbose("Step 4/6: Checking if SSH key is already registered")
 	keys, err := authClient.GetSSHKeys()
@@ -131,11 +124,9 @@ func (lc *Command) Execute() error {
 
 	logging.Verbose("Step 6/6: Saving configuration to disk")
 	cfg := &config.Config{
-		Username:             lc.Username,
-		APIToken:             lc.APIToken,
-		BearerToken:          bearerToken,
-		BearerTokenExpiresAt: expiresAt,
-		APIEndpoint:          lc.APIEndpoint,
+		Username:    lc.Username,
+		APIToken:    lc.APIToken,
+		APIEndpoint: lc.APIEndpoint,
 	}
 
 	if err := cfg.Save(); err != nil {
@@ -155,7 +146,7 @@ func (lc *Command) validateFlags() error {
 	}
 
 	if lc.APIToken == "" {
-		return output.NewValidationError("API token is required (-p or --password)")
+		return output.NewValidationError("API key is required (-p or --password)")
 	}
 
 	if !isValidEmail(lc.Username) {

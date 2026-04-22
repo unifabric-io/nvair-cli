@@ -1,6 +1,10 @@
 package create
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+
+	"github.com/unifabric-io/nvair-cli/pkg/api"
+)
 
 // Command represents the create subcommand for creating simulations.
 type Command struct {
@@ -14,7 +18,7 @@ type Command struct {
 // NewCommand creates a new Command instance with defaults.
 func NewCommand() *Command {
 	return &Command{
-		APIEndpoint:    "https://air.nvidia.com/api",
+		APIEndpoint:    api.DefaultBaseURL,
 		DeleteIfExists: false, // Default to false
 	}
 }

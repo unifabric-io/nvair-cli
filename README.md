@@ -178,9 +178,9 @@ nvair --verbose login -u user@example.com -p <api-token>
 # [DEBUG] [2026-02-10 10:23:45] Verbose mode enabled
 # [DEBUG] [2026-02-10 10:23:45] Login command started with username: user@example.com
 # [DEBUG] [2026-02-10 10:23:45] Flags validated successfully
-# [DEBUG] [2026-02-10 10:23:45] Step 1/6: Authenticating with API endpoint: https://air.nvidia.com/api
-# [DEBUG] [2026-02-10 10:23:45] doRequest: [Attempt 1/3] POST https://air.nvidia.com/api/v1/login/
-# [DEBUG] [2026-02-10 10:23:45] doRequest: Request body: {"username":"user@example.com","password":"..."}
+# [DEBUG] [2026-02-10 10:23:45] Step 1/6: Using provided API key directly with API endpoint: https://api.dsx-air.nvidia.com/api
+# [DEBUG] [2026-02-10 10:23:45] doRequest: [Attempt 1/3] GET https://api.dsx-air.nvidia.com/api/v3/users/ssh-keys/?limit=
+# [DEBUG] [2026-02-10 10:23:45] doRequest: Authorization header set with API token: nvapi-...
 # ...
 ```
 

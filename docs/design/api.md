@@ -2,54 +2,25 @@
 
 **Status**: Complete  
 **Generated**: January 9, 2026  
-**Base URL**: `https://air.nvidia.com/api`  
-**Authentication**: Bearer Token (OAuth2)  
-**Swagger Documentation**: https://air.nvidia.com/api/
+**Base URL**: `https://api.dsx-air.nvidia.com/api`  
+**Authentication**: API key via `Authorization: Bearer <apiToken>`  
+**Swagger Documentation**: https://api.dsx-air.nvidia.com/api/
 
-All requests must include: `Authorization: Bearer <token>`
+Authenticated requests include the stored API key directly: `Authorization: Bearer <apiToken>`. The CLI does not exchange it for a separate bearer token.
 
 ---
 
-## 1. Authentication Endpoint
+## 1. Authentication
 
-### POST /v1/auth/login
+The CLI uses the user-provided API key directly for authenticated API calls. It does not call a login endpoint to exchange the API key for a separate bearer token, and local configuration does not store `bearerToken` or `bearerTokenExpiresAt`.
 
-Exchange username and API token for bearer token.
-
-Request:
-```json
-{
-    "username": "example@example.com",
-    "password": "YzVhYWQ0M2UtNjY0ZC00NzgwLWI4YTktNDI5MmZlZGU5MTRh" # api token
-}
-```
-
-Response (200 OK):
-```json
-{
-    "result": "OK",
-    "message": "Successfully logged in.",
-    "token": "base64-1.base64-2.base64-3"
-}
-```
-
-After being base64 decoding, the result is as follows:
-```json
-{
-  "account": "b0fb214a-8b3d-44d9-0000-50a743b37945",
-  "realm": "api",
-  "exp": 1766735420,
-  "admin": false,
-  "staff": false,
-  "jti": "cf9ba7d382274a3492fc585ed8070000",
-  "token_type": "access"
-}
+Request header:
+```http
+Authorization: Bearer <apiToken>
 ```
 
 HTTP Status Codes:
-- `200 OK`: Successful authentication
-- `400 Bad Request`: Missing required fields
-- `401 Unauthorized`: Invalid credentials
+- `401 Unauthorized`: Invalid or missing API key
 - `429 Too Many Requests`: Rate limited (retry after X seconds)
 
 ---
@@ -170,7 +141,7 @@ Response (200 Created):
           "sleep": true,
           "sleep_at": "2026-01-09T14:23:18.313695Z",
           "state": "STORED",
-          "title": "demo",
+          "name": "demo",
           "write_ok": true
         }
     ]

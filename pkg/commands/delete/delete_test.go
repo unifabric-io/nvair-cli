@@ -58,16 +58,16 @@ func TestExecute_DeleteForwardByTarget(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v2/simulations" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
-		case r.URL.Path == "/v1/service" && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","name":"lab-a","state":"RUNNING"}]}`))
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
 				{"id":"svc-1","name":"forward-22->oob-mgmt-server:22","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"},
 				{"id":"svc-2","name":"forward-20000->node-gpu-1:6443","simulation":"sim-1","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
 			]`))
-		case r.URL.Path == "/v1/service/svc-2/" && r.Method == "DELETE":
+		case r.URL.Path == "/v3/service/svc-2/" && r.Method == "DELETE":
 			deleteCalled = true
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -76,7 +76,7 @@ func TestExecute_DeleteForwardByTarget(t *testing.T) {
 	}))
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	dc := NewCommand()
 	dc.APIEndpoint = server.URL
@@ -89,7 +89,7 @@ func TestExecute_DeleteForwardByTarget(t *testing.T) {
 		t.Fatalf("execute delete forward failed: %v", err)
 	}
 	if !deleteCalled {
-		t.Fatalf("expected DELETE /v1/service/svc-2/ to be called")
+		t.Fatalf("expected DELETE /v3/service/svc-2/ to be called")
 	}
 	if dc.ResourceName != "forward-20000->node-gpu-1:6443" {
 		t.Fatalf("expected deleted resource name to be set, got %q", dc.ResourceName)
@@ -101,15 +101,15 @@ func TestExecute_DeleteForwardByTarget_CompatibleWithLegacyName(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v2/simulations" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
-		case r.URL.Path == "/v1/service" && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","name":"lab-a","state":"RUNNING"}]}`))
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
 				{"id":"svc-1","name":"forward-ssh-10022->node-gpu-1:22","simulation":"sim-1","dest_port":10022,"src_port":17922,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
 			]`))
-		case r.URL.Path == "/v1/service/svc-1/" && r.Method == "DELETE":
+		case r.URL.Path == "/v3/service/svc-1/" && r.Method == "DELETE":
 			deleteCalled = true
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -118,7 +118,7 @@ func TestExecute_DeleteForwardByTarget_CompatibleWithLegacyName(t *testing.T) {
 	}))
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	dc := NewCommand()
 	dc.APIEndpoint = server.URL
@@ -131,17 +131,17 @@ func TestExecute_DeleteForwardByTarget_CompatibleWithLegacyName(t *testing.T) {
 		t.Fatalf("execute delete forward failed: %v", err)
 	}
 	if !deleteCalled {
-		t.Fatalf("expected DELETE /v1/service/svc-1/ to be called")
+		t.Fatalf("expected DELETE /v3/service/svc-1/ to be called")
 	}
 }
 
 func TestExecute_DeleteForwardNotFoundByTarget(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v2/simulations" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
-		case r.URL.Path == "/v1/service" && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","name":"lab-a","state":"RUNNING"}]}`))
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
 				{"id":"svc-1","name":"forward-22->oob-mgmt-server:22","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}
@@ -152,7 +152,7 @@ func TestExecute_DeleteForwardNotFoundByTarget(t *testing.T) {
 	}))
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	dc := NewCommand()
 	dc.APIEndpoint = server.URL
@@ -189,17 +189,15 @@ func TestExecute_DeleteForwardRequiresTargetPort(t *testing.T) {
 	}
 }
 
-func setupConfig(t *testing.T, endpoint, bearer string, expiresAt time.Time) {
+func setupConfig(t *testing.T, endpoint, apiToken string, _ time.Time) {
 	t.Helper()
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 
 	cfg := &config.Config{
-		Username:             "user@example.com",
-		APIToken:             "api-token",
-		BearerToken:          bearer,
-		BearerTokenExpiresAt: expiresAt,
-		APIEndpoint:          endpoint,
+		Username:    "user@example.com",
+		APIToken:    apiToken,
+		APIEndpoint: endpoint,
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("failed to save config: %v", err)

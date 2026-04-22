@@ -36,3 +36,10 @@ coverage.out
 
 ## AI
 .codex/
+.agents/
+.github/agents
+.github/prompts
+.specify/*
+!.specify/
+!.specify/memory/
+!.specify/memory/**
