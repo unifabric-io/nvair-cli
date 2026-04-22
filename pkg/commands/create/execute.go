@@ -177,6 +177,10 @@ func (cc *Command) Execute() error {
 	logging.Info("✓ Create simulation successfully.")
 	logging.Info("  Bastion SSH address: %s", bastionAddr)
 	logging.Info("  Bastion SSH command: %s", formatBastionSSHCommand(sshResponse.Host, sshResponse.SrcPort, keyPath))
+	logging.Info("  To get more details about the simulation:")
+	logging.Info("    nvair get simulation")
+	logging.Info("    nvair get nodes -s %s", simResp.Title)
+	logging.Info("    nvair get forwards -s %s", simResp.Title)
 	return nil
 }
 
