@@ -349,7 +349,7 @@ func WaitPingViaBastion(ctx context.Context, cfg BastionExecConfig, timeout time
 
 		pingCfg := cfg
 		pingCfg.Command = fmt.Sprintf("ping -c1 -W6 %s", host)
-		logging.Info("%s ...", pingCfg.Command)
+		logging.Verbose("%s ...", pingCfg.Command)
 		res, err := ExecCommandOnBastion(pingCfg)
 		if err == nil && res != nil && res.ExitCode == 0 {
 			return nil
