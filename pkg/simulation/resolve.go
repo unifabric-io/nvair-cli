@@ -29,7 +29,7 @@ func Resolve(apiClient *api.Client, simulationName string) (Resolution, error) {
 		case 1:
 			return Resolution{
 				ID:           simulations[0].ID,
-				Name:         simulations[0].Title,
+				Name:         simulations[0].Name,
 				AutoSelected: true,
 			}, nil
 		case 0:
@@ -42,10 +42,10 @@ func Resolve(apiClient *api.Client, simulationName string) (Resolution, error) {
 	}
 
 	for _, sim := range simulations {
-		if sim.Title == simulationName {
+		if sim.Name == simulationName {
 			return Resolution{
 				ID:   sim.ID,
-				Name: sim.Title,
+				Name: sim.Name,
 			}, nil
 		}
 	}

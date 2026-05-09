@@ -7,7 +7,7 @@
             "node-gpu-1": {
                 "nic_model": "e1000",
                 "cpu": 4,
-                "memory": 8192,
+                "memory": 4096,
                 "storage": 10,
                 "positioning": {
                     "x": 550,
@@ -31,7 +31,7 @@
             "node-gpu-2": {
                 "nic_model": "e1000",
                 "cpu": 4,
-                "memory": 8192,
+                "memory": 4096,
                 "storage": 10,
                 "positioning": {
                     "x": 825,
@@ -55,7 +55,7 @@
             "node-gpu-3": {
                 "nic_model": "e1000",
                 "cpu": 4,
-                "memory": 8192,
+                "memory": 4096,
                 "storage": 10,
                 "positioning": {
                     "x": 1375,
@@ -79,7 +79,7 @@
             "node-gpu-4": {
                 "nic_model": "e1000",
                 "cpu": 4,
-                "memory": 8192,
+                "memory": 4096,
                 "storage": 10,
                 "positioning": {
                     "x": 1650,
@@ -127,7 +127,7 @@
             "switch-gpu-leaf1": {
                 "nic_model": "virtio",
                 "cpu": 4,
-                "memory": 8192,
+                "memory": 4096,
                 "storage": 10,
                 "positioning": {
                     "x": 550,
@@ -151,7 +151,7 @@
             "switch-gpu-leaf2": {
                 "nic_model": "virtio",
                 "cpu": 4,
-                "memory": 8192,
+                "memory": 4096,
                 "storage": 10,
                 "positioning": {
                     "x": 825,
@@ -175,7 +175,7 @@
             "switch-gpu-leaf3": {
                 "nic_model": "virtio",
                 "cpu": 4,
-                "memory": 8192,
+                "memory": 4096,
                 "storage": 10,
                 "positioning": {
                     "x": 1375,
@@ -199,7 +199,7 @@
             "switch-gpu-leaf4": {
                 "nic_model": "virtio",
                 "cpu": 4,
-                "memory": 8192,
+                "memory": 4096,
                 "storage": 10,
                 "positioning": {
                     "x": 1650,
@@ -247,7 +247,7 @@
             "switch-storage-leaf1": {
                 "nic_model": "virtio",
                 "cpu": 4,
-                "memory": 8192,
+                "memory": 4096,
                 "storage": 10,
                 "positioning": {
                     "x": 1100,
@@ -4066,7 +4066,7 @@
             "nodes": {
                 "netq-ts": {
                     "cpu": 4,
-                    "memory": 6144,
+                    "memory": 4096,
                     "storage": 64,
                     "positioning": {
                         "x": 1100,

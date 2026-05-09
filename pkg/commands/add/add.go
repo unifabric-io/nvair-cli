@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -236,11 +235,12 @@ func (ac *Command) formatExistingForwardTarget(apiClient *api.Client, simulation
 	nodes, err := apiClient.GetNodes(simulationID)
 	if err == nil {
 		for _, n := range nodes {
-			metadata, err := node.ParseNodeMetadata(n.Metadata)
-			if err != nil {
+			mgmtIP, resolveErr := node.ResolveMgmtIP(n)
+			if resolveErr != nil {
+				logging.Verbose("Skipping node %s while formatting forward target: %v", n.Name, resolveErr)
 				continue
 			}
-			if sameForwardHost(metadata.MgmtIP, target.Host) {
+			if sameForwardHost(mgmtIP, target.Host) {
 				host = n.Name
 				break
 			}
@@ -347,32 +347,12 @@ func resolveForwardAddress(service api.EnableSSHResponse) string {
 
 func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config, error) {
 	cfg, err := config.Load()
-	if err != nil || cfg.BearerToken == "" {
+	if err != nil || cfg.APIToken == "" {
 		return nil, nil, fmt.Errorf("not authenticated. Please run 'nvair login' first")
 	}
 
 	endpoint := config.ResolveAPIEndpoint(cfg, apiEndpoint)
-
-	if cfg.IsTokenExpired(time.Now()) {
-		if cfg.APIToken == "" {
-			return nil, nil, fmt.Errorf("authentication token has expired and no API token available. Please run 'nvair login' again")
-		}
-
-		refreshClient := api.NewClient(endpoint, "")
-		newBearerToken, expiresAt, err := refreshClient.AuthLogin(cfg.Username, cfg.APIToken)
-		if err != nil {
-			return nil, nil, fmt.Errorf("authentication token expired and refresh failed: %w", err)
-		}
-
-		cfg.BearerToken = newBearerToken
-		cfg.BearerTokenExpiresAt = expiresAt
-		if err := cfg.Save(); err != nil {
-			logging.Verbose("Warning: Failed to save refreshed token: %v", err)
-			return nil, nil, fmt.Errorf("authentication token refreshed but failed to persist new token: %w", err)
-		}
-	}
-
-	return api.NewClient(endpoint, cfg.BearerToken), cfg, nil
+	return api.NewClient(endpoint, cfg.APIToken), cfg, nil
 }
 
 // setupIPTables SSHes into oob-mgmt-server and configures DNAT + MASQUERADE rules
@@ -431,14 +411,14 @@ func (ac *Command) resolveDestinationIP(apiClient *api.Client, simulationID, des
 		if n.Name != destination {
 			continue
 		}
-		metadata, err := node.ParseNodeMetadata(n.Metadata)
+		mgmtIP, err := node.ResolveMgmtIP(n)
 		if err != nil {
-			return "", fmt.Errorf("failed to parse metadata for node %s: %w", n.Name, err)
+			return "", fmt.Errorf("failed to resolve management IP for node %s: %w", n.Name, err)
 		}
-		if metadata.MgmtIP == "" {
-			return "", fmt.Errorf("node %s has no mgmt_ip in metadata", n.Name)
+		if mgmtIP == "" {
+			return "", fmt.Errorf("node %s has no management IP", n.Name)
 		}
-		return strings.TrimSpace(metadata.MgmtIP), nil
+		return mgmtIP, nil
 	}
 	return "", fmt.Errorf("destination %q is not a valid IP and no node with that name was found", destination)
 }
@@ -450,7 +430,7 @@ func (ac *Command) findSSHService(apiClient *api.Client, simulationID string) (s
 		return "", 0, err
 	}
 	for _, svc := range services {
-		if svc.NodeName == constant.OOBMgmtServerName &&
+		if (svc.NodeName == constant.OOBMgmtServerName || forwardutil.IsBastionSSHServiceName(svc.Name)) &&
 			strings.EqualFold(svc.ServiceType, "ssh") &&
 			svc.Host != "" &&
 			svc.SrcPort > 0 {

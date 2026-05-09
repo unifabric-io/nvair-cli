@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/unifabric-io/nvair-cli/pkg/bastion"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
 	"github.com/unifabric-io/nvair-cli/pkg/constant"
+	forwardutil "github.com/unifabric-io/nvair-cli/pkg/forward"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
 	"github.com/unifabric-io/nvair-cli/pkg/node"
 	"github.com/unifabric-io/nvair-cli/pkg/output"
@@ -206,32 +206,12 @@ func (ec *Command) configureVerbose() {
 
 func (ec *Command) ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config, error) {
 	cfg, err := config.Load()
-	if err != nil || cfg.BearerToken == "" {
+	if err != nil || cfg.APIToken == "" {
 		return nil, nil, fmt.Errorf("not authenticated. Please run 'nvair login' first")
 	}
 
 	endpoint := config.ResolveAPIEndpoint(cfg, apiEndpoint)
-
-	if cfg.IsTokenExpired(time.Now()) {
-		if cfg.APIToken == "" {
-			return nil, nil, fmt.Errorf("authentication token has expired and no API token available. Please run 'nvair login' again")
-		}
-
-		refreshClient := api.NewClient(endpoint, "")
-		newBearerToken, expiresAt, err := refreshClient.AuthLogin(cfg.Username, cfg.APIToken)
-		if err != nil {
-			return nil, nil, fmt.Errorf("authentication token expired and refresh failed: %w", err)
-		}
-
-		cfg.BearerToken = newBearerToken
-		cfg.BearerTokenExpiresAt = expiresAt
-		if err := cfg.Save(); err != nil {
-			logging.Verbose("Warning: Failed to save refreshed token: %v", err)
-			return nil, nil, fmt.Errorf("authentication token refreshed but failed to persist new token: %w", err)
-		}
-	}
-
-	return api.NewClient(endpoint, cfg.BearerToken), cfg, nil
+	return api.NewClient(endpoint, cfg.APIToken), cfg, nil
 }
 
 func (ec *Command) errWriter() io.Writer {
@@ -248,7 +228,8 @@ func (ec *Command) findSSHService(apiClient *api.Client, simulationID string) (s
 	}
 
 	for _, service := range services {
-		if strings.EqualFold(service.ServiceType, "ssh") &&
+		if (service.NodeName == constant.OOBMgmtServerName || forwardutil.IsBastionSSHServiceName(service.Name)) &&
+			strings.EqualFold(service.ServiceType, "ssh") &&
 			service.Host != "" &&
 			service.SrcPort > 0 {
 			return service.Host, service.SrcPort, nil
@@ -284,20 +265,21 @@ func (ec *Command) findNodeByName(apiClient *api.Client, simulationID, nodeName 
 			continue
 		}
 
-		metadata, err := node.ParseNodeMetadata(n.Metadata)
+		mgmtIP, err := node.ResolveMgmtIP(n)
 		if err != nil {
-			return nil, "", fmt.Errorf("failed to parse node metadata for %s: %w", n.Name, err)
+			return nil, "", fmt.Errorf("failed to resolve management IP for node %s: %w", n.Name, err)
 		}
-
-		mgmtIP := strings.TrimSpace(metadata.MgmtIP)
 		if mgmtIP == "" {
-			return nil, "", fmt.Errorf("node %s metadata does not contain mgmt_ip", n.Name)
+			return nil, "", fmt.Errorf("node %s does not have a management IP", n.Name)
 		}
 
-		if resolvedImageName, ok := imageNames[n.OS]; ok {
+		imageID := node.ResolveImageID(n)
+		n.Image = imageID
+		n.OS = imageID
+		if resolvedImageName, ok := imageNames[imageID]; ok {
 			n.OSName = resolvedImageName
 		} else {
-			n.OSName = n.OS
+			n.OSName = imageID
 		}
 
 		return &n, mgmtIP, nil

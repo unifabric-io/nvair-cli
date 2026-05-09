@@ -23,6 +23,33 @@ func ParseNodeMetadata(metadata string) (*NodeMetadata, error) {
 	return &nm, nil
 }
 
+// ResolveMgmtIP returns the node management IP from the new top-level field first,
+// and falls back to legacy metadata.mgmt_ip for older API responses.
+func ResolveMgmtIP(n api.Node) (string, error) {
+	if mgmtIP := strings.TrimSpace(n.ManagementIP); mgmtIP != "" {
+		return mgmtIP, nil
+	}
+	if strings.TrimSpace(n.Metadata) == "" {
+		return "", nil
+	}
+
+	metadata, err := ParseNodeMetadata(n.Metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve management IP from node metadata: %w", err)
+	}
+
+	return strings.TrimSpace(metadata.MgmtIP), nil
+}
+
+// ResolveImageID returns the node image identifier from the new top-level image
+// field first, and falls back to the legacy os field for older API responses.
+func ResolveImageID(n api.Node) string {
+	if imageID := strings.TrimSpace(n.Image); imageID != "" {
+		return imageID
+	}
+	return strings.TrimSpace(n.OS)
+}
+
 // SortNodesByName sorts nodes by their name in ascending order
 func SortNodesByName(nodes []api.Node) {
 	sort.Slice(nodes, func(i, j int) bool {

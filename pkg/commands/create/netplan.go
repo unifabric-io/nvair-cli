@@ -63,10 +63,15 @@ func uploadNetplanConfigs(directory string, nodeNetplanTargets []api.Node, basti
 		go func() {
 			defer wg.Done()
 
-			meta, err := node.ParseNodeMetadata(n.Metadata)
+			mgmtIP, err := node.ResolveMgmtIP(n)
 			if err != nil {
-				logging.Verbose("Failed to parse metadata for node %s: %v", n.Name, err)
-				errCh <- fmt.Errorf("parse metadata failed for node %s: %w", n.Name, err)
+				logging.Verbose("Failed to resolve management IP for node %s: %v", n.Name, err)
+				errCh <- fmt.Errorf("failed to resolve management IP for node %s: %w", n.Name, err)
+				return
+			}
+			if mgmtIP == "" {
+				logging.Verbose("Management IP missing for node %s", n.Name)
+				errCh <- fmt.Errorf("node %s does not have a management IP", n.Name)
 				return
 			}
 
@@ -87,12 +92,12 @@ func uploadNetplanConfigs(directory string, nodeNetplanTargets []api.Node, basti
 			}
 
 			tmpDst := constant.NetplanStagingRemotePath
-			logging.Info("Copying netplan for node %s (%s)...", n.Name, meta.MgmtIP)
+			logging.Info("Copying netplan for node %s (%s)...", n.Name, mgmtIP)
 			if err := ssh.CopyFileViaBastion(ssh.BastionCopyConfig{
 				BastionAddr: bastionAddr,
 				BastionUser: constant.DefaultUbuntuUser,
 				BastionKey:  keyPath,
-				TargetAddr:  meta.MgmtIP + ":22",
+				TargetAddr:  mgmtIP + ":22",
 				TargetUser:  constant.DefaultUbuntuUser,
 				TargetPass:  constant.DefaultUbuntuPassword,
 				Timeout:     60 * time.Second,
@@ -107,7 +112,7 @@ func uploadNetplanConfigs(directory string, nodeNetplanTargets []api.Node, basti
 				BastionAddr: bastionAddr,
 				BastionKey:  keyPath,
 				TargetUser:  constant.DefaultUbuntuUser,
-				TargetAddr:  meta.MgmtIP + ":22",
+				TargetAddr:  mgmtIP + ":22",
 				TargetPass:  constant.DefaultUbuntuPassword,
 				Command:     fmt.Sprintf("sudo mv %s /etc/netplan/%s && sudo netplan apply", tmpDst, fileName),
 			})

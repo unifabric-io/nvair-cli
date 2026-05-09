@@ -3,94 +3,46 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
-	"time"
-
-	"github.com/unifabric-io/nvair-cli/pkg/testutil"
 )
-
-// TestAuthLogin_Success tests successful authentication.
-func TestAuthLogin_Success(t *testing.T) {
-	// Create a mock server
-	expectedToken := testutil.MakeTestJWT(time.Now().Add(24 * time.Hour))
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/login/" {
-			http.NotFound(w, r)
-			return
-		}
-
-		resp := AuthLoginResponse{
-			Result:  "OK",
-			Message: "Successfully logged in.",
-			Token:   expectedToken,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "")
-	token, expiresAt, err := client.AuthLogin("user@example.com", "test-api-token")
-
-	if err != nil {
-		t.Fatalf("AuthLogin failed: %v", err)
-	}
-
-	if token != expectedToken {
-		t.Errorf("Token mismatch: got %q, want %q", token, expectedToken)
-	}
-
-	// Check that expiry is roughly 24 hours from now
-	now := time.Now()
-	expectedTime := now.Add(24 * time.Hour)
-	diff := expiresAt.Sub(expectedTime).Abs()
-	if diff > 1*time.Minute {
-		t.Errorf("ExpiresAt time is too far off: expected ~%v, got %v (diff: %v)", expectedTime, expiresAt, diff)
-	}
-}
-
-// TestAuthLogin_InvalidCredentials tests 401 response.
-func TestAuthLogin_InvalidCredentials(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "Invalid credentials"}`))
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "")
-	_, _, err := client.AuthLogin("user@example.com", "wrong-token")
-
-	if err == nil {
-		t.Error("Expected error for invalid credentials, got nil")
-	}
-}
 
 // TestGetSSHKeys_Success tests successful retrieval of SSH keys.
 func TestGetSSHKeys_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify bearer token is present
+		if r.URL.Path != "/v3/users/ssh-keys/" {
+			http.NotFound(w, r)
+			return
+		}
+		if got, want := r.URL.Query().Get("limit"), strconv.FormatInt(math.MaxInt64, 10); got != want {
+			t.Errorf("limit query mismatch: got %q, want %q", got, want)
+		}
+
+		// Verify API token is present
 		authHeader := r.Header.Get("Authorization")
 		if authHeader != "Bearer test-token" {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		keys := []GetSSHKeyResponse{
-			{
-				ID:          "key-1",
-				Name:        "my-key",
-				Fingerprint: "abc123==",
+		resp := listSSHKeysResponse{
+			Count: 1,
+			Results: []GetSSHKeyResponse{
+				{
+					Created:     "2026-04-22T07:08:35.573313Z",
+					ID:          "key-1",
+					Name:        "my-key",
+					Fingerprint: "abc123==",
+				},
 			},
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(keys)
+		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -134,7 +86,7 @@ func TestGetSSHKeys_Empty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("[]"))
+		w.Write([]byte(`{"count":0,"next":null,"previous":null,"results":[]}`))
 	}))
 	defer server.Close()
 
@@ -153,6 +105,10 @@ func TestGetSSHKeys_Empty(t *testing.T) {
 // TestCreateSSHKey_Success tests successful key creation.
 func TestCreateSSHKey_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/users/ssh-keys/" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.Method != "POST" {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -207,10 +163,56 @@ func TestCreateSSHKey_Conflict(t *testing.T) {
 	}
 }
 
+// TestCreateSSHKey_CreatedEmptyBody tests 201 Created without a response body.
+func TestCreateSSHKey_CreatedEmptyBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/users/ssh-keys/" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	keyResp, err := client.CreateSSHKey("ssh-ed25519 AAAA...", "my-key")
+
+	if err != nil {
+		t.Fatalf("CreateSSHKey failed: %v", err)
+	}
+	if keyResp.Name != "my-key" {
+		t.Errorf("Key name mismatch: got %q, want %q", keyResp.Name, "my-key")
+	}
+}
+
+// TestDeleteSSHKey_Success tests the v3 users SSH key delete endpoint.
+func TestDeleteSSHKey_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/users/ssh-keys/key-1/" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodDelete {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	if err := client.DeleteSSHKey("key-1"); err != nil {
+		t.Fatalf("DeleteSSHKey failed: %v", err)
+	}
+}
+
 // TestRetryLogic_TransientFailure tests retry on 5xx errors.
 func TestRetryLogic_TransientFailure(t *testing.T) {
 	attemptCount := 0
-	expectedToken := testutil.MakeTestJWT(time.Now().Add(24 * time.Hour))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attemptCount++
 		if attemptCount < 3 {
@@ -218,22 +220,17 @@ func TestRetryLogic_TransientFailure(t *testing.T) {
 			return
 		}
 		// Success on 3rd attempt
-		resp := AuthLoginResponse{Result: "OK", Token: expectedToken}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		w.Write([]byte(`{"count":0,"next":null,"previous":null,"results":[]}`))
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "")
-	gotToken, _, err := client.AuthLogin("user@example.com", "token")
+	client := NewClient(server.URL, "test-token")
+	_, err := client.GetSSHKeys()
 
 	if err != nil {
-		t.Fatalf("AuthLogin failed after retries: %v", err)
-	}
-
-	if gotToken != expectedToken {
-		t.Errorf("Token mismatch: got %q, want %q", gotToken, expectedToken)
+		t.Fatalf("GetSSHKeys failed after retries: %v", err)
 	}
 
 	if attemptCount != 3 {
@@ -250,8 +247,8 @@ func TestRetryLogic_PermanentFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "")
-	_, _, err := client.AuthLogin("user@example.com", "token")
+	client := NewClient(server.URL, "test-token")
+	_, err := client.GetSSHKeys()
 
 	if err == nil {
 		t.Error("Expected error for bad request, got nil")
@@ -262,14 +259,14 @@ func TestRetryLogic_PermanentFailure(t *testing.T) {
 	}
 }
 
-// TestBearerTokenInHeader tests that bearer token is properly included in requests.
-func TestBearerTokenInHeader(t *testing.T) {
+// TestAPITokenInHeader tests that API token is properly included in requests.
+func TestAPITokenInHeader(t *testing.T) {
 	var capturedAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("[]"))
+		w.Write([]byte(`{"count":0,"next":null,"previous":null,"results":[]}`))
 	}))
 	defer server.Close()
 
@@ -282,30 +279,10 @@ func TestBearerTokenInHeader(t *testing.T) {
 	}
 }
 
-// TestNoAuthOnLoginEndpoint tests that login endpoint doesn't use bearer token.
-func TestNoAuthOnLoginEndpoint(t *testing.T) {
-	var capturedAuth string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedAuth = r.Header.Get("Authorization")
-		resp := AuthLoginResponse{Result: "OK", Token: "new-token"}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "irrelevant-token")
-	client.AuthLogin("user@example.com", "api-token")
-
-	if capturedAuth != "" {
-		t.Errorf("AuthLogin should not include bearer token, but got %q", capturedAuth)
-	}
-}
-
 // TestGetSimulations_Success tests retrieving simulations list.
 func TestGetSimulations_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/simulations" {
+		if r.URL.Path != "/v3/simulations" {
 			http.NotFound(w, r)
 			return
 		}
@@ -315,12 +292,12 @@ func TestGetSimulations_Success(t *testing.T) {
 			Results: []SimulationInfo{
 				{
 					ID:    "sim-1",
-					Title: "simple",
+					Name:  "simple",
 					State: "NEW",
 				},
 				{
 					ID:    "sim-2",
-					Title: "complex",
+					Name:  "complex",
 					State: "READY",
 				},
 			},
@@ -343,31 +320,31 @@ func TestGetSimulations_Success(t *testing.T) {
 		t.Errorf("Expected 2 simulations, got %d", len(sims))
 	}
 
-	if sims[0].Title != "simple" || sims[0].ID != "sim-1" {
+	if sims[0].Name != "simple" || sims[0].ID != "sim-1" {
 		t.Errorf("First simulation mismatch: got %v", sims[0])
 	}
 
-	if sims[1].Title != "complex" || sims[1].ID != "sim-2" {
+	if sims[1].Name != "complex" || sims[1].ID != "sim-2" {
 		t.Errorf("Second simulation mismatch: got %v", sims[1])
 	}
 }
 
 // TestDeleteSimulation_ByName tests deleting a simulation by name.
-// The deletion flow: list simulations -> find by title -> delete by ID
+// The deletion flow: list simulations -> find by name -> delete by ID
 func TestDeleteSimulation_ByName(t *testing.T) {
 	requestLog := []string{}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestLog = append(requestLog, r.Method+" "+r.URL.Path)
 
-		if r.URL.Path == "/v2/simulations" && r.Method == "GET" {
+		if r.URL.Path == "/v3/simulations" && r.Method == "GET" {
 			// List simulations response
 			resp := ListSimulationsResponse{
 				Count: 1,
 				Results: []SimulationInfo{
 					{
 						ID:    "c51aed7b-febf-45fd-881d-83c373f9282f",
-						Title: "simple",
+						Name:  "simple",
 						State: "NEW",
 					},
 				},
@@ -378,7 +355,7 @@ func TestDeleteSimulation_ByName(t *testing.T) {
 			return
 		}
 
-		if r.URL.Path == "/v2/simulations/c51aed7b-febf-45fd-881d-83c373f9282f/" && r.Method == "DELETE" {
+		if r.URL.Path == "/v3/simulations/c51aed7b-febf-45fd-881d-83c373f9282f/" && r.Method == "DELETE" {
 			// Delete response
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNoContent)
@@ -401,19 +378,19 @@ func TestDeleteSimulation_ByName(t *testing.T) {
 		t.Errorf("Expected 2 requests (list then delete), got %d: %v", len(requestLog), requestLog)
 	}
 
-	if len(requestLog) >= 1 && requestLog[0] != "GET /v2/simulations" {
-		t.Errorf("First request should be GET /v2/simulations, got %s", requestLog[0])
+	if len(requestLog) >= 1 && requestLog[0] != "GET /v3/simulations" {
+		t.Errorf("First request should be GET /v3/simulations, got %s", requestLog[0])
 	}
 
-	if len(requestLog) >= 2 && requestLog[1] != "DELETE /v2/simulations/c51aed7b-febf-45fd-881d-83c373f9282f/" {
-		t.Errorf("Second request should be DELETE /v2/simulations/{id}/, got %s", requestLog[1])
+	if len(requestLog) >= 2 && requestLog[1] != "DELETE /v3/simulations/c51aed7b-febf-45fd-881d-83c373f9282f/" {
+		t.Errorf("Second request should be DELETE /v3/simulations/{id}/, got %s", requestLog[1])
 	}
 }
 
 // TestDeleteSimulation_NotFound tests deletion when simulation doesn't exist.
 func TestDeleteSimulation_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/simulations" && r.Method == "GET" {
+		if r.URL.Path == "/v3/simulations" && r.Method == "GET" {
 			// Empty list response
 			resp := ListSimulationsResponse{
 				Count:   0,
@@ -441,26 +418,26 @@ func TestDeleteSimulation_NotFound(t *testing.T) {
 	}
 }
 
-// TestControlSimulation_Success tests setting simulation state.
-func TestControlSimulation_Success(t *testing.T) {
+// TestStartSimulation_Success tests starting a simulation.
+func TestStartSimulation_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/simulation/sim-id-123/control/" && r.Method == "POST" {
+		if r.URL.Path == "/v3/simulations/sim-id-123/start/" && r.Method == http.MethodPatch {
 			// Verify request body
-			var reqBody map[string]string
+			var reqBody map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&reqBody)
 
-			if reqBody["action"] != "load" {
-				t.Errorf("Expected action 'load', got %q", reqBody["action"])
-			}
-
-			resp := ControlSimulationResponse{
-				Result: "OK",
-				Jobs:   []string{"job-1", "job-2"},
+			if len(reqBody) != 0 {
+				t.Errorf("Expected empty lifecycle payload, got %#v", reqBody)
 			}
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(resp)
+			json.NewEncoder(w).Encode(SimulationInfo{
+				ID:      "sim-id-123",
+				Name:    "demo",
+				State:   "REQUESTING",
+				Created: "2026-05-09T00:00:00Z",
+			})
 			return
 		}
 
@@ -469,29 +446,20 @@ func TestControlSimulation_Success(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "test-token")
-	resp, err := client.ControlSimulation("sim-id-123", "load")
+	resp, err := client.StartSimulation("sim-id-123")
 
 	if err != nil {
-		t.Fatalf("ControlSimulation failed: %v", err)
+		t.Fatalf("StartSimulation failed: %v", err)
 	}
-
-	if resp.Result != "OK" {
-		t.Errorf("Expected result 'OK', got %q", resp.Result)
-	}
-
-	if len(resp.Jobs) != 2 {
-		t.Errorf("Expected 2 jobs, got %d", len(resp.Jobs))
-	}
-
-	if resp.Jobs[0] != "job-1" || resp.Jobs[1] != "job-2" {
-		t.Errorf("Job list mismatch: got %v", resp.Jobs)
+	if resp.State != "REQUESTING" {
+		t.Errorf("Expected state 'REQUESTING', got %q", resp.State)
 	}
 }
 
-// TestControlSimulation_Error tests error handling for control simulation.
-func TestControlSimulation_Error(t *testing.T) {
+// TestStartSimulation_Error tests error handling for start simulation.
+func TestStartSimulation_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/simulation/invalid-id/control/" && r.Method == "POST" {
+		if r.URL.Path == "/v3/simulations/invalid-id/start/" && r.Method == http.MethodPatch {
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte(`{"error": "simulation not found"}`))
 			return
@@ -502,7 +470,7 @@ func TestControlSimulation_Error(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "test-token")
-	_, err := client.ControlSimulation("invalid-id", "load")
+	_, err := client.StartSimulation("invalid-id")
 
 	if err == nil {
 		t.Fatal("Expected error for invalid simulation, got nil")
@@ -513,15 +481,41 @@ func TestControlSimulation_Error(t *testing.T) {
 	}
 }
 
-func TestGetServices_Success(t *testing.T) {
+func TestGetSimulationByID_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/service" || r.Method != "GET" {
+		if r.URL.Path != "/v3/simulations/sim-id-123/" || r.Method != http.MethodGet {
 			http.NotFound(w, r)
 			return
 		}
 
-		if r.URL.Query().Get("simulation") != "sim-123" {
-			http.Error(w, "invalid simulation query", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(SimulationInfo{
+			ID:      "sim-id-123",
+			Name:    "demo",
+			State:   "ACTIVE",
+			Created: "2026-05-09T00:00:00Z",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	sim, err := client.GetSimulationByID("sim-id-123")
+	if err != nil {
+		t.Fatalf("GetSimulationByID failed: %v", err)
+	}
+
+	if sim.State != "ACTIVE" {
+		t.Fatalf("expected ACTIVE state, got %q", sim.State)
+	}
+	if sim.Name != "demo" {
+		t.Fatalf("expected demo name, got %q", sim.Name)
+	}
+}
+
+func TestCreateService_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/simulations/nodes/interfaces/services/" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
 			return
 		}
 
@@ -530,20 +524,104 @@ func TestGetServices_Success(t *testing.T) {
 			return
 		}
 
-		resp := []EnableSSHResponse{
-			{
-				ID:          "svc-1",
-				Name:        "bastion-ssh",
-				ServiceType: "ssh",
-				Host:        "worker01.air.nvidia.com",
-				SrcPort:     16821,
-			},
-			{
-				ID:          "svc-2",
-				Name:        "k8s-default-my-web-app-30080",
-				ServiceType: "tcp",
-				Host:        "worker01.air.nvidia.com",
-				SrcPort:     17922,
+		var reqBody map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+
+		if reqBody["name"] != "bastion-ssh" {
+			t.Fatalf("expected name bastion-ssh, got %#v", reqBody["name"])
+		}
+		if reqBody["interface"] != "if-out" {
+			t.Fatalf("expected interface if-out, got %#v", reqBody["interface"])
+		}
+		if reqBody["node_port"] != float64(22) {
+			t.Fatalf("expected node_port 22, got %#v", reqBody["node_port"])
+		}
+		if reqBody["service_type"] != "SSH" {
+			t.Fatalf("expected service_type SSH, got %#v", reqBody["service_type"])
+		}
+		if _, ok := reqBody["simulation"]; ok {
+			t.Fatalf("did not expect simulation in request body, got %#v", reqBody["simulation"])
+		}
+		if _, ok := reqBody["dest_port"]; ok {
+			t.Fatalf("did not expect dest_port in request body, got %#v", reqBody["dest_port"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":           "svc-1",
+			"name":         "bastion-ssh",
+			"interface":    "if-out",
+			"service_type": "SSH",
+			"worker_fqdn":  "worker01.air.nvidia.com",
+			"worker_port":  16821,
+			"node_port":    22,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	service, err := client.CreateSSHService("sim-123", "if-out")
+	if err != nil {
+		t.Fatalf("CreateSSHService failed: %v", err)
+	}
+
+	if service.Host != "worker01.air.nvidia.com" {
+		t.Fatalf("expected normalized host, got %q", service.Host)
+	}
+	if service.SrcPort != 16821 {
+		t.Fatalf("expected normalized src_port 16821, got %d", service.SrcPort)
+	}
+	if service.DestPort != 22 {
+		t.Fatalf("expected normalized dest_port 22, got %d", service.DestPort)
+	}
+}
+
+func TestGetServices_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/simulations/nodes/interfaces/services/" || r.Method != "GET" {
+			http.NotFound(w, r)
+			return
+		}
+
+		if r.URL.Query().Get("simulation") != "sim-123" {
+			http.Error(w, "invalid simulation query", http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("limit") != "25" {
+			http.Error(w, "invalid limit query", http.StatusBadRequest)
+			return
+		}
+
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, "missing auth", http.StatusUnauthorized)
+			return
+		}
+
+		resp := map[string]interface{}{
+			"count":    2,
+			"next":     nil,
+			"previous": nil,
+			"results": []map[string]interface{}{
+				{
+					"id":           "svc-1",
+					"name":         "oob-mgmt-server SSH",
+					"service_type": "SSH",
+					"worker_fqdn":  "worker01.air.nvidia.com",
+					"worker_port":  16821,
+					"node_port":    22,
+					"interface":    "if-out",
+				},
+				{
+					"id":           "svc-2",
+					"name":         "k8s-default-my-web-app-30080",
+					"service_type": "TCP",
+					"worker_fqdn":  "worker01.air.nvidia.com",
+					"worker_port":  17922,
+					"node_port":    30080,
+				},
 			},
 		}
 
@@ -562,17 +640,23 @@ func TestGetServices_Success(t *testing.T) {
 	if len(services) != 2 {
 		t.Fatalf("expected 2 services, got %d", len(services))
 	}
-	if services[0].ServiceType != "ssh" {
-		t.Fatalf("expected first service_type ssh, got %q", services[0].ServiceType)
+	if services[0].ServiceType != "SSH" {
+		t.Fatalf("expected first service_type SSH, got %q", services[0].ServiceType)
 	}
 	if services[0].SrcPort != 16821 {
 		t.Fatalf("expected first src_port 16821, got %d", services[0].SrcPort)
+	}
+	if services[0].DestPort != 22 {
+		t.Fatalf("expected first dest_port 22, got %d", services[0].DestPort)
+	}
+	if services[0].Host != "worker01.air.nvidia.com" {
+		t.Fatalf("expected first host to be normalized, got %q", services[0].Host)
 	}
 }
 
 func TestGetServices_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/service" && r.Method == "GET" {
+		if r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "GET" {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"simulation not found"}`))
 			return
@@ -593,7 +677,7 @@ func TestGetServices_Error(t *testing.T) {
 
 func TestDeleteServiceByID_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/service/svc-123/" && r.Method == "DELETE" {
+		if r.URL.Path == "/v3/simulations/nodes/interfaces/services/svc-123/" && r.Method == "DELETE" {
 			if r.Header.Get("Authorization") != "Bearer test-token" {
 				http.Error(w, "missing auth", http.StatusUnauthorized)
 				return
@@ -613,7 +697,7 @@ func TestDeleteServiceByID_Success(t *testing.T) {
 
 func TestDeleteServiceByID_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/service/svc-404/" && r.Method == "DELETE" {
+		if r.URL.Path == "/v3/simulations/nodes/interfaces/services/svc-404/" && r.Method == "DELETE" {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"service not found"}`))
 			return
@@ -635,25 +719,22 @@ func TestDeleteServiceByID_NotFound(t *testing.T) {
 // TestGetNodes_Success tests retrieving nodes list.
 func TestGetNodes_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/simulations/nodes/" && r.Method == "GET" {
-			resp := nodeListResponse{
-				Results: []Node{
-					{
-						ID:    "node-1",
-						Name:  "oob-mgmt-server",
-						State: "UP",
-					},
-					{
-						ID:    "node-2",
-						Name:  "leaf01",
-						State: "UP",
-					},
-				},
+		if r.URL.Path == "/v3/simulations/nodes/" && r.Method == "GET" {
+			q := r.URL.Query()
+			if q.Get("simulation") != "test-simulation-id" {
+				http.Error(w, "missing simulation filter", http.StatusBadRequest)
+				return
 			}
-
+			if q.Get("ordering") != "image" {
+				http.Error(w, "invalid ordering", http.StatusBadRequest)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(resp)
+			_, _ = w.Write([]byte(`{"count":2,"results":[
+				{"id":"node-1","name":"oob-mgmt-server","state":"UP","management_ip":"192.168.200.5","image":"img-ubuntu","metadata":null},
+				{"id":"node-2","name":"leaf01","state":"UP","management_ip":"192.168.200.6","image":"img-cumulus","metadata":{"legacy":"value"}}
+			]}`))
 			return
 		}
 
@@ -679,12 +760,21 @@ func TestGetNodes_Success(t *testing.T) {
 	if nodes[1].Name != "leaf01" {
 		t.Errorf("Expected second node to be 'leaf01', got %q", nodes[1].Name)
 	}
+	if nodes[0].ManagementIP != "192.168.200.5" {
+		t.Errorf("Expected first node management IP to be populated, got %q", nodes[0].ManagementIP)
+	}
+	if nodes[1].Image != "img-cumulus" || nodes[1].OS != "img-cumulus" {
+		t.Errorf("Expected second node image fields to be normalized, got image=%q os=%q", nodes[1].Image, nodes[1].OS)
+	}
+	if nodes[1].Metadata != `{"legacy":"value"}` {
+		t.Errorf("Expected object metadata to be preserved as JSON, got %q", nodes[1].Metadata)
+	}
 }
 
 // TestGetNodeInterfaces_Success tests retrieving node interfaces.
 func TestGetNodeInterfaces_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/simulations/nodes/interfaces" && r.Method == "GET" {
+		if r.URL.Path == "/v3/simulations/nodes/interfaces" && r.Method == "GET" {
 			// Check query parameters
 			q := r.URL.Query()
 			if q.Get("simulation") != "sim-123" || q.Get("node") != "node-1" {
@@ -742,7 +832,7 @@ func TestGetNodeInterfaces_Success(t *testing.T) {
 // TestGetNodeInterfaces_Error tests error handling for node interfaces.
 func TestGetNodeInterfaces_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/simulations/nodes/interfaces" && r.Method == "GET" {
+		if r.URL.Path == "/v3/simulations/nodes/interfaces" && r.Method == "GET" {
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte(`{"error": "node not found"}`))
 			return
@@ -767,7 +857,7 @@ func TestGetNodeInterfaces_Error(t *testing.T) {
 // TestGetJob_Success tests retrieving job status.
 func TestGetJob_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/jobs/job-123" && r.Method == "GET" {
+		if r.URL.Path == "/v3/jobs/job-123" && r.Method == "GET" {
 			resp := Job{
 				ID:          "job-123",
 				Category:    "LOAD",
@@ -810,7 +900,7 @@ func TestGetJob_Success(t *testing.T) {
 // TestGetJob_Error tests error handling for missing job.
 func TestGetJob_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/jobs/nonexistent" && r.Method == "GET" {
+		if r.URL.Path == "/v3/jobs/nonexistent" && r.Method == "GET" {
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte(`{"error": "job not found"}`))
 			return

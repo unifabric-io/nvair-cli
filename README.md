@@ -2,7 +2,7 @@
 
 ## Overview
 
-The nvair CLI is a command-line tool that provides access to the [air.nvidia.com](https://air.nvidia.com/) platform for network simulation management. 
+The nvair CLI is a command-line tool that provides access to the [dsx-air.nvidia.com](https://dsx-air.nvidia.com/) platform for network simulation management. 
 
 Key features:
 
@@ -23,12 +23,12 @@ Key features:
 
 ### Create NVIDIA Air API token
 
-1. Go to `https://air.nvidia.com`
-2. Click the settings icon in the upper right corner
+1. Go to `https://org.ngc.nvidia.com/account/api-keys`
+2. Click **Generate Personal Key**
 3. Give your API token a name and set an expiration date
 4. Confirm to create the token
 
-![](./docs/images/create-token.png)
+![](./docs/images/dsx-air-create-token.png)
 
 ## Core Concepts
 
@@ -178,9 +178,9 @@ nvair --verbose login -u user@example.com -p <api-token>
 # [DEBUG] [2026-02-10 10:23:45] Verbose mode enabled
 # [DEBUG] [2026-02-10 10:23:45] Login command started with username: user@example.com
 # [DEBUG] [2026-02-10 10:23:45] Flags validated successfully
-# [DEBUG] [2026-02-10 10:23:45] Step 1/6: Authenticating with API endpoint: https://air.nvidia.com/api
-# [DEBUG] [2026-02-10 10:23:45] doRequest: [Attempt 1/3] POST https://air.nvidia.com/api/v1/login/
-# [DEBUG] [2026-02-10 10:23:45] doRequest: Request body: {"username":"user@example.com","password":"..."}
+# [DEBUG] [2026-02-10 10:23:45] Step 1/6: Using provided API key directly with API endpoint: https://api.dsx-air.nvidia.com/api
+# [DEBUG] [2026-02-10 10:23:45] doRequest: [Attempt 1/3] GET https://api.dsx-air.nvidia.com/api/v3/users/ssh-keys/?limit=
+# [DEBUG] [2026-02-10 10:23:45] doRequest: Authorization header set with API token: nvapi-...
 # ...
 ```
 
@@ -195,4 +195,4 @@ Verbose mode logs are printed to stderr and include timestamps. This is especial
 
 - For example topologies and usage samples, see the [examples directory](./examples/) and [examples guide](./examples/README.md).
 - For developer-focused setup, including build, tests, and CI, see the [development guide](./docs/development/development.md).
-- For API details and the data model, see the [API contract](./docs/design/contracts/api.md) and [data model](./docs/design/data-model.md).
+- For API details, see the [API contract](./docs/design/api.md).

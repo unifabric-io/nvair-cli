@@ -163,26 +163,34 @@ func (rc *RootCommand) newCreateCommand() *cobra.Command {
 }
 
 func (rc *RootCommand) newDeleteCommand() *cobra.Command {
-	deleteCmd := deletecmd.NewCommand()
 	cmd := &cobra.Command{
-		Use:           "delete <simulation> <name>",
+		Use:           "delete",
 		Short:         "Delete resources",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		ValidArgs:     []string{"simulation"},
-		Args: func(cmd *cobra.Command, args []string) error {
-			return deletecmd.ValidateArgs(args)
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			deleteCmd.Verbose = rc.Verbose
-			deleteCmd.Stderr = cmd.ErrOrStderr()
-			deleteCmd.ResourceType = args[0]
-			deleteCmd.ResourceName = args[1]
-			return deleteCmd.Execute()
+			return cmd.Help()
 		},
 	}
-	deleteCmd.Register(cmd)
 
+	simulationDeleteCmd := deletecmd.NewCommand()
+	simulationCmd := &cobra.Command{
+		Use:           "simulation <name>",
+		Aliases:       []string{"simulations"},
+		Short:         "Delete a simulation",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			simulationDeleteCmd.Verbose = rc.Verbose
+			simulationDeleteCmd.Stderr = cmd.ErrOrStderr()
+			simulationDeleteCmd.ResourceType = "simulation"
+			simulationDeleteCmd.ResourceName = args[0]
+			return simulationDeleteCmd.Execute()
+		},
+	}
+
+	forwardDeleteCmd := deletecmd.NewCommand()
 	forwardCmd := &cobra.Command{
 		Use:           "forward <forward-name>",
 		Aliases:       []string{"forwards"},
@@ -191,16 +199,16 @@ func (rc *RootCommand) newDeleteCommand() *cobra.Command {
 		SilenceErrors: true,
 		Args:          cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			deleteCmd.Verbose = rc.Verbose
-			deleteCmd.Stderr = cmd.ErrOrStderr()
-			deleteCmd.ResourceType = "forward"
-			deleteCmd.ResourceName = args[0]
-			deleteCmd.SimulationName, _ = cmd.Flags().GetString("simulation")
-			return deleteCmd.Execute()
+			forwardDeleteCmd.Verbose = rc.Verbose
+			forwardDeleteCmd.Stderr = cmd.ErrOrStderr()
+			forwardDeleteCmd.ResourceType = "forward"
+			forwardDeleteCmd.ResourceName = args[0]
+			forwardDeleteCmd.SimulationName, _ = cmd.Flags().GetString("simulation")
+			return forwardDeleteCmd.Execute()
 		},
 	}
 	forwardCmd.Flags().StringP("simulation", "s", "", "Simulation name (optional when only one simulation exists)")
-	cmd.AddCommand(forwardCmd)
+	cmd.AddCommand(simulationCmd, forwardCmd)
 
 	return cmd
 }

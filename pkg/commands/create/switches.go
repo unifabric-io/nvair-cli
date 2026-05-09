@@ -35,10 +35,15 @@ func resetSwitchPasswords(ctx context.Context, switchNodes []api.Node, bastionAd
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			meta, err := node.ParseNodeMetadata(n.Metadata)
+			mgmtIP, err := node.ResolveMgmtIP(n)
 			if err != nil {
-				logging.Verbose("Failed to parse metadata for switch %s: %v", n.Name, err)
-				errCh <- fmt.Errorf("parse metadata failed for switch %s: %w", n.Name, err)
+				logging.Verbose("Failed to resolve management IP for switch %s: %v", n.Name, err)
+				errCh <- fmt.Errorf("failed to resolve management IP for switch %s: %w", n.Name, err)
+				return
+			}
+			if mgmtIP == "" {
+				logging.Verbose("Management IP missing for switch %s", n.Name)
+				errCh <- fmt.Errorf("switch %s does not have a management IP", n.Name)
 				return
 			}
 
@@ -47,12 +52,12 @@ func resetSwitchPasswords(ctx context.Context, switchNodes []api.Node, bastionAd
 				BastionAddr: bastionAddr,
 				BastionKey:  keyPath,
 				TargetUser:  constant.DefaultCumulusUser,
-				TargetAddr:  meta.MgmtIP + ":22",
+				TargetAddr:  mgmtIP + ":22",
 				TargetPass:  constant.DefaultCumulusOldPassword,
 				Command:     "",
 			}
 
-			if err := bastion.WaitPingViaBastion(ctx, pingCfg, 180*time.Second); err != nil {
+			if err := bastion.WaitPingViaBastion(ctx, pingCfg, 600*time.Second); err != nil {
 				logging.Verbose("Switch %s not reachable: %v", n.Name, err)
 				errCh <- fmt.Errorf("switch %s unreachable: %w", n.Name, err)
 				return
@@ -64,7 +69,7 @@ func resetSwitchPasswords(ctx context.Context, switchNodes []api.Node, bastionAd
 				BastionAddr: bastionAddr,
 				BastionUser: constant.DefaultUbuntuUser,
 				BastionKey:  keyPath,
-				SwitchAddr:  meta.MgmtIP + ":22",
+				SwitchAddr:  mgmtIP + ":22",
 				SwitchUser:  constant.DefaultCumulusUser,
 				OldPassword: constant.DefaultCumulusOldPassword,
 				NewPassword: constant.DefaultCumulusNewPassword,
@@ -104,10 +109,15 @@ func copySwitchConfigs(directory string, switchNodes []api.Node, bastionAddr, ke
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			meta, err := node.ParseNodeMetadata(n.Metadata)
+			mgmtIP, err := node.ResolveMgmtIP(n)
 			if err != nil {
-				logging.Verbose("Failed to parse metadata for switch %s: %v", n.Name, err)
-				errCh <- fmt.Errorf("parse metadata failed for switch %s: %w", n.Name, err)
+				logging.Verbose("Failed to resolve management IP for switch %s: %v", n.Name, err)
+				errCh <- fmt.Errorf("failed to resolve management IP for switch %s: %w", n.Name, err)
+				return
+			}
+			if mgmtIP == "" {
+				logging.Verbose("Management IP missing for switch %s", n.Name)
+				errCh <- fmt.Errorf("switch %s does not have a management IP", n.Name)
 				return
 			}
 
@@ -122,12 +132,12 @@ func copySwitchConfigs(directory string, switchNodes []api.Node, bastionAddr, ke
 				return
 			}
 
-			logging.Info("Copying config for switch %s (%s)...", n.Name, meta.MgmtIP)
+			logging.Info("Copying config for switch %s (%s)...", n.Name, mgmtIP)
 			if err := ssh.CopyFileViaBastion(ssh.BastionCopyConfig{
 				BastionAddr: bastionAddr,
 				BastionUser: constant.DefaultUbuntuUser,
 				BastionKey:  keyPath,
-				TargetAddr:  meta.MgmtIP + ":22",
+				TargetAddr:  mgmtIP + ":22",
 				TargetUser:  constant.DefaultCumulusUser,
 				TargetPass:  constant.DefaultCumulusNewPassword,
 				Timeout:     120 * time.Second,
@@ -166,10 +176,15 @@ func applySwitchConfigs(switchNodes []api.Node, bastionAddr, keyPath string) err
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			meta, err := node.ParseNodeMetadata(n.Metadata)
+			mgmtIP, err := node.ResolveMgmtIP(n)
 			if err != nil {
-				logging.Verbose("Failed to parse metadata for switch %s: %v", n.Name, err)
-				errCh <- fmt.Errorf("parse metadata failed for switch %s: %w", n.Name, err)
+				logging.Verbose("Failed to resolve management IP for switch %s: %v", n.Name, err)
+				errCh <- fmt.Errorf("failed to resolve management IP for switch %s: %w", n.Name, err)
+				return
+			}
+			if mgmtIP == "" {
+				logging.Verbose("Management IP missing for switch %s", n.Name)
+				errCh <- fmt.Errorf("switch %s does not have a management IP", n.Name)
 				return
 			}
 
@@ -179,7 +194,7 @@ func applySwitchConfigs(switchNodes []api.Node, bastionAddr, keyPath string) err
 				BastionAddr: bastionAddr,
 				BastionKey:  keyPath,
 				TargetUser:  constant.DefaultCumulusUser,
-				TargetAddr:  meta.MgmtIP + ":22",
+				TargetAddr:  mgmtIP + ":22",
 				// The password here is a placeholder and is only used for resetting.
 				// The actual password can be set in the `hashed-password` field of the
 				// switch configuration file (examples/simple/switch-gpu-leaf1.yaml).

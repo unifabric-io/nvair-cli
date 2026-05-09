@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -102,46 +101,17 @@ func (sc *Command) loadUsableSession(cfg *config.Config) *config.Config {
 
 	cfg.Username = strings.TrimSpace(cfg.Username)
 	cfg.APIToken = strings.TrimSpace(cfg.APIToken)
-	cfg.BearerToken = strings.TrimSpace(cfg.BearerToken)
 
-	if cfg.Username == "" || cfg.BearerToken == "" {
+	if cfg.Username == "" || cfg.APIToken == "" {
 		logging.Verbose("Status: configuration is missing required session fields")
 		return nil
-	}
-
-	if !cfg.IsTokenExpired(time.Now()) {
-		return cfg
-	}
-
-	if cfg.APIToken == "" {
-		logging.Verbose("Status: bearer token expired and no API token is available for refresh")
-		return nil
-	}
-
-	endpoint := config.ResolveAPIEndpoint(cfg, sc.APIEndpoint)
-	refreshClient := api.NewClient(endpoint, "")
-	newBearerToken, expiresAt, err := refreshClient.AuthLogin(cfg.Username, cfg.APIToken)
-	if err != nil {
-		logging.Verbose("Status: bearer token refresh failed: %v", err)
-		return nil
-	}
-
-	cfg.BearerToken = strings.TrimSpace(newBearerToken)
-	cfg.BearerTokenExpiresAt = expiresAt
-	if cfg.BearerToken == "" {
-		logging.Verbose("Status: refresh returned an empty bearer token")
-		return nil
-	}
-
-	if err := cfg.Save(); err != nil {
-		logging.Verbose("Status: refreshed token could not be saved: %v", err)
 	}
 
 	return cfg
 }
 
 func (sc *Command) probeConnectivity(cfg *config.Config) error {
-	apiClient := api.NewClient(config.ResolveAPIEndpoint(cfg, sc.APIEndpoint), cfg.BearerToken)
+	apiClient := api.NewClient(config.ResolveAPIEndpoint(cfg, sc.APIEndpoint), cfg.APIToken)
 	_, err := apiClient.GetSimulations()
 	return err
 }
