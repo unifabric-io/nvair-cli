@@ -6,6 +6,7 @@ import (
 
 	"github.com/unifabric-io/nvair-cli/pkg/api"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
+	nodeutil "github.com/unifabric-io/nvair-cli/pkg/node"
 )
 
 func findOOBMgmtServer(nodes []api.Node) (string, error) {
@@ -60,19 +61,22 @@ func resolveNodeImageNames(nodes []api.Node, images []api.ImageInfo) []api.Node 
 	copy(resolved, nodes)
 
 	for i := range resolved {
-		resolved[i].OSName = imageNamesByID[resolved[i].OS]
+		imageID := nodeutil.ResolveImageID(resolved[i])
+		resolved[i].Image = imageID
+		resolved[i].OS = imageID
+		resolved[i].OSName = imageNamesByID[imageID]
 		if resolved[i].OSName == "" {
-			resolved[i].OSName = resolved[i].OS
+			resolved[i].OSName = imageID
 		}
 	}
 
 	return resolved
 }
 
-func nodeImageName(node api.Node) string {
-	if node.OSName != "" {
-		return node.OSName
+func nodeImageName(n api.Node) string {
+	if n.OSName != "" {
+		return n.OSName
 	}
 
-	return node.OS
+	return nodeutil.ResolveImageID(n)
 }

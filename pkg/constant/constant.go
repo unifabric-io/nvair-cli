@@ -2,7 +2,7 @@ package constant
 
 const (
 	// DefaultAPIEndpoint is the default NVIDIA Air API base URL.
-	DefaultAPIEndpoint = "https://air.nvidia.com/api"
+	DefaultAPIEndpoint = "https://api.dsx-air.nvidia.com/api"
 
 	// DefaultKeyName is the default name for the SSH key file
 	DefaultKeyName = "nvair.unifabric.io"

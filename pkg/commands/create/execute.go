@@ -61,23 +61,31 @@ func (cc *Command) Execute() error {
 
 	logging.Info("✓ Simulation created successfully. ID: %s, Name: %s", simResp.ID, simResp.Title)
 
-	ctrlResp, err := apiClient.ControlSimulation(simResp.ID, "load")
+	logging.Info("Waiting for imported simulation to become INACTIVE ...")
+	if err := cc.WaitForSimulationState(apiClient, simResp.ID, "INACTIVE"); err != nil {
+		logging.Verbose("Simulation import state wait failed: %v", err)
+		return fmt.Errorf("simulation import did not reach INACTIVE state: %w", err)
+	}
+	logging.Info("✓ Simulation import completed. State: INACTIVE.")
+
+	startResp, err := apiClient.StartSimulation(simResp.ID)
 	if err != nil {
-		logging.Verbose("Failed to set simulation state: %v", err)
-		return fmt.Errorf("failed to set simulation state to load: %w", err)
+		logging.Verbose("Failed to start simulation: %v", err)
+		return fmt.Errorf("failed to start simulation: %w", err)
 	}
 
-	logging.Info("✓ Simulation state set to 'load', result: %s, jobs: %v", ctrlResp.Result, ctrlResp.Jobs)
-
-	if len(ctrlResp.Jobs) > 0 {
-		logging.Info("Waiting for %d jobs to complete ...", len(ctrlResp.Jobs))
-
-		if err := cc.WaitForJobs(apiClient, ctrlResp.Jobs); err != nil {
-			logging.Verbose("Job wait failed: %v", err)
-			return err
-		}
-		logging.Info("✓ All jobs completed successfully.")
+	currentState := startResp.State
+	if currentState == "" {
+		currentState = "UNKNOWN"
 	}
+	logging.Info("✓ Simulation start requested. Current state: %s", currentState)
+	logging.Info("Waiting for simulation to become ACTIVE ...")
+
+	if err := cc.WaitForSimulationState(apiClient, simResp.ID, "ACTIVE"); err != nil {
+		logging.Verbose("Simulation state wait failed: %v", err)
+		return err
+	}
+	logging.Info("✓ Simulation is ACTIVE.")
 
 	nodes, err := apiClient.GetNodes(simResp.ID)
 	if err != nil {

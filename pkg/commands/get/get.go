@@ -58,6 +58,7 @@ type NodeView struct {
 	Name       string             `json:"name"               yaml:"name"`
 	State      string             `json:"state"              yaml:"state"`
 	Simulation string             `json:"simulation"         yaml:"simulation"`
+	MgmtIP     string             `json:"management_ip,omitempty" yaml:"management_ip,omitempty"`
 	Image      NodeImageView      `json:"image"              yaml:"image"`
 	Metadata   *node.NodeMetadata `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
@@ -65,7 +66,7 @@ type NodeView struct {
 // SimulationSummary is the enriched view of a simulation used in `get simulations` output.
 type SimulationSummary struct {
 	ID      string    `json:"id"      yaml:"id"`
-	Title   string    `json:"title"   yaml:"title"`
+	Name    string    `json:"name"    yaml:"name"`
 	State   string    `json:"state"   yaml:"state"`
 	Created string    `json:"created" yaml:"created"`
 	Count   NodeCount `json:"count"   yaml:"count"`
@@ -206,6 +207,7 @@ func (gc *Command) executeNodes(cmd *cobra.Command) error {
 
 	views := buildNodeViews(nodes, images)
 	views = filterOOBNodes(views)
+	sortNodeViews(views)
 	return renderNodeOutput(cmd.OutOrStdout(), views, format)
 }
 
@@ -281,7 +283,7 @@ func renderSimulationOutput(w io.Writer, summaries []SimulationSummary, format s
 				created = t.Local().Format("2006-01-02 15:04:05")
 			}
 			rows = append(rows, []string{
-				s.Title,
+				s.Name,
 				s.State,
 				created,
 				s.ID,
@@ -304,14 +306,15 @@ func buildSimulationSummaries(simulations []api.SimulationInfo, allNodes []api.N
 		countMap[sim.ID] = &NodeCount{}
 	}
 
-	for _, node := range allNodes {
-		counts, ok := countMap[node.Simulation]
+	for _, n := range allNodes {
+		counts, ok := countMap[n.Simulation]
 		if !ok {
 			continue
 		}
-		imgName := strings.ToLower(imageNames[node.OS])
+		imageID := node.ResolveImageID(n)
+		imgName := strings.ToLower(imageNames[imageID])
 		if imgName == "" {
-			imgName = strings.ToLower(node.OS)
+			imgName = strings.ToLower(imageID)
 		}
 		if strings.Contains(imgName, "cumulus") {
 			counts.Switch++
@@ -328,7 +331,7 @@ func buildSimulationSummaries(simulations []api.SimulationInfo, allNodes []api.N
 		}
 		summaries = append(summaries, SimulationSummary{
 			ID:      sim.ID,
-			Title:   sim.Title,
+			Name:    sim.Name,
 			State:   sim.State,
 			Created: sim.Created,
 			Count:   *counts,
@@ -341,11 +344,15 @@ func buildForwardViews(services []api.EnableSSHResponse) []ForwardView {
 	views := make([]ForwardView, 0, len(services))
 	for _, service := range services {
 		targetHost, targetPort := resolveForwardTarget(service)
+		nodeName := service.NodeName
+		if nodeName == "" {
+			nodeName = targetHost
+		}
 		views = append(views, ForwardView{
 			ID:          service.ID,
 			Name:        service.Name,
 			ServiceType: service.ServiceType,
-			NodeName:    service.NodeName,
+			NodeName:    nodeName,
 			DestPort:    service.DestPort,
 			SrcPort:     service.SrcPort,
 			Host:        service.Host,
@@ -367,6 +374,12 @@ func buildForwardViews(services []api.EnableSSHResponse) []ForwardView {
 }
 
 func resolveForwardTarget(service api.EnableSSHResponse) (string, int) {
+	if parsed, ok := forwardutil.ParseServiceName(service.Name); ok {
+		return parsed.TargetHost, parsed.TargetPort
+	}
+	if forwardutil.IsBastionSSHServiceName(service.Name) {
+		return constant.OOBMgmtServerName, 22
+	}
 	return service.NodeName, service.DestPort
 }
 
@@ -453,11 +466,15 @@ func (gc *Command) nodeNamesByMgmtIP(apiClient *api.Client, simulationID string)
 		return namesByIP
 	}
 	for _, n := range nodes {
-		metadata, err := node.ParseNodeMetadata(n.Metadata)
-		if err != nil || metadata.MgmtIP == "" {
+		mgmtIP, err := node.ResolveMgmtIP(n)
+		if err != nil {
+			logging.Verbose("Skipping node %s during management IP lookup: %v", n.Name, err)
 			continue
 		}
-		namesByIP[strings.TrimSpace(metadata.MgmtIP)] = n.Name
+		if mgmtIP == "" {
+			continue
+		}
+		namesByIP[mgmtIP] = n.Name
 	}
 
 	return namesByIP
@@ -491,7 +508,8 @@ func (gc *Command) findSSHService(apiClient *api.Client, simulationID string) (s
 		return "", 0, err
 	}
 	for _, svc := range services {
-		if strings.EqualFold(svc.ServiceType, "ssh") &&
+		if (svc.NodeName == constant.OOBMgmtServerName || forwardutil.IsBastionSSHServiceName(svc.Name)) &&
+			strings.EqualFold(svc.ServiceType, "ssh") &&
 			svc.Host != "" &&
 			svc.SrcPort > 0 {
 			return svc.Host, svc.SrcPort, nil
@@ -515,7 +533,9 @@ func renderNodeOutput(w io.Writer, nodes []NodeView, format string) error {
 		rows := make([][]string, 0, len(nodes))
 		for _, node := range nodes {
 			mgmtIP := "-"
-			if node.Metadata != nil && node.Metadata.MgmtIP != "" {
+			if node.MgmtIP != "" {
+				mgmtIP = node.MgmtIP
+			} else if node.Metadata != nil && node.Metadata.MgmtIP != "" {
 				mgmtIP = node.Metadata.MgmtIP
 			}
 			osDisplay := node.Image.Name
@@ -586,16 +606,26 @@ func buildNodeViews(nodes []api.Node, images []api.ImageInfo) []NodeView {
 
 	views := make([]NodeView, 0, len(nodes))
 	for _, n := range nodes {
-		imgView := NodeImageView{ID: n.OS}
-		if img, ok := imageMap[n.OS]; ok {
+		imageID := node.ResolveImageID(n)
+		imgView := NodeImageView{ID: imageID}
+		if img, ok := imageMap[imageID]; ok {
 			imgView.Name = img.Name
 		}
 
+		mgmtIP, resolveErr := node.ResolveMgmtIP(n)
+		if resolveErr != nil {
+			logging.Verbose("Failed to resolve management IP for node %s: %v", n.Name, resolveErr)
+		}
 		var meta *node.NodeMetadata
-		if n.Metadata != "" {
+		if n.Metadata != "" && resolveErr == nil {
 			if parsed, err := node.ParseNodeMetadata(n.Metadata); err == nil {
 				meta = parsed
+			} else {
+				logging.Verbose("Failed to parse metadata for node %s: %v", n.Name, err)
 			}
+		}
+		if mgmtIP == "" && meta != nil {
+			mgmtIP = strings.TrimSpace(meta.MgmtIP)
 		}
 
 		views = append(views, NodeView{
@@ -603,6 +633,7 @@ func buildNodeViews(nodes []api.Node, images []api.ImageInfo) []NodeView {
 			Name:       n.Name,
 			State:      n.State,
 			Simulation: n.Simulation,
+			MgmtIP:     mgmtIP,
 			Image:      imgView,
 			Metadata:   meta,
 		})
@@ -613,11 +644,102 @@ func buildNodeViews(nodes []api.Node, images []api.ImageInfo) []NodeView {
 func filterOOBNodes(views []NodeView) []NodeView {
 	filtered := views[:0]
 	for _, v := range views {
-		if v.Name != constant.OOBMgmtServerName && v.Name != constant.OOBMgmtSwitchName {
-			filtered = append(filtered, v)
+		if shouldHideOOBNode(v) {
+			continue
 		}
+		filtered = append(filtered, v)
 	}
 	return filtered
+}
+
+func shouldHideOOBNode(v NodeView) bool {
+	if v.Name == constant.OOBMgmtServerName || v.Name == constant.OOBMgmtSwitchName {
+		return true
+	}
+
+	imageName := strings.ToLower(strings.TrimSpace(v.Image.Name))
+	if imageName == "" {
+		imageName = strings.ToLower(strings.TrimSpace(v.Image.ID))
+	}
+
+	return imageName == constant.OOBMgmtServerName || imageName == constant.OOBMgmtSwitchName
+}
+
+func sortNodeViews(views []NodeView) {
+	sort.SliceStable(views, func(i, j int) bool {
+		leftImage := strings.ToLower(nodeViewImageDisplay(views[i]))
+		rightImage := strings.ToLower(nodeViewImageDisplay(views[j]))
+		if leftImage != rightImage {
+			return leftImage < rightImage
+		}
+		return naturalLess(strings.ToLower(views[i].Name), strings.ToLower(views[j].Name))
+	})
+}
+
+func nodeViewImageDisplay(v NodeView) string {
+	if imageName := strings.TrimSpace(v.Image.Name); imageName != "" {
+		return imageName
+	}
+	return strings.TrimSpace(v.Image.ID)
+}
+
+func naturalLess(a, b string) bool {
+	ai, bi := 0, 0
+	for ai < len(a) && bi < len(b) {
+		if isDigit(a[ai]) && isDigit(b[bi]) {
+			aj := ai
+			for aj < len(a) && isDigit(a[aj]) {
+				aj++
+			}
+			bj := bi
+			for bj < len(b) && isDigit(b[bj]) {
+				bj++
+			}
+
+			an := strings.TrimLeft(a[ai:aj], "0")
+			bn := strings.TrimLeft(b[bi:bj], "0")
+			if an == "" {
+				an = "0"
+			}
+			if bn == "" {
+				bn = "0"
+			}
+			if len(an) != len(bn) {
+				return len(an) < len(bn)
+			}
+			if an != bn {
+				return an < bn
+			}
+
+			ai = aj
+			bi = bj
+			continue
+		}
+
+		aj := ai
+		for aj < len(a) && !isDigit(a[aj]) {
+			aj++
+		}
+		bj := bi
+		for bj < len(b) && !isDigit(b[bj]) {
+			bj++
+		}
+
+		as := a[ai:aj]
+		bs := b[bi:bj]
+		if as != bs {
+			return as < bs
+		}
+
+		ai = aj
+		bi = bj
+	}
+
+	return a < b
+}
+
+func isDigit(ch byte) bool {
+	return ch >= '0' && ch <= '9'
 }
 
 func extractMgmtIP(metadata string) string {
@@ -674,30 +796,10 @@ func writeYAML(w io.Writer, v interface{}) error {
 
 func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config, error) {
 	cfg, err := config.Load()
-	if err != nil || cfg.BearerToken == "" {
+	if err != nil || cfg.APIToken == "" {
 		return nil, nil, fmt.Errorf("not authenticated. Please run 'nvair login' first")
 	}
 
 	endpoint := config.ResolveAPIEndpoint(cfg, apiEndpoint)
-
-	if cfg.IsTokenExpired(time.Now()) {
-		if cfg.APIToken == "" {
-			return nil, nil, fmt.Errorf("authentication token has expired and no API token available. Please run 'nvair login' again")
-		}
-
-		refreshClient := api.NewClient(endpoint, "")
-		newBearerToken, expiresAt, err := refreshClient.AuthLogin(cfg.Username, cfg.APIToken)
-		if err != nil {
-			return nil, nil, fmt.Errorf("authentication token expired and refresh failed: %w", err)
-		}
-
-		cfg.BearerToken = newBearerToken
-		cfg.BearerTokenExpiresAt = expiresAt
-		if err := cfg.Save(); err != nil {
-			logging.Verbose("Warning: Failed to save refreshed token: %v", err)
-			return nil, nil, fmt.Errorf("authentication token refreshed but failed to persist new token: %w", err)
-		}
-	}
-
-	return api.NewClient(endpoint, cfg.BearerToken), cfg, nil
+	return api.NewClient(endpoint, cfg.APIToken), cfg, nil
 }

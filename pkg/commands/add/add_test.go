@@ -77,36 +77,36 @@ func TestExecuteForward_SuccessAllocatesFirstAutoPort(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v2/simulations" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
-		case r.URL.Path == "/v1/service" && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","name":"lab-a","state":"RUNNING"}]}`))
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
 				{"id":"svc-ssh","name":"bastion-ssh","simulation":"sim-1","interface":"if-out","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"}
 			]`))
-		case r.URL.Path == "/v2/simulations/nodes/" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":2,"results":[
 				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
 				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
-		case r.URL.Path == "/v2/simulations/nodes/interfaces" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/interfaces" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"if-out","name":"eth0","interface_type":"ETHERNET","mac_address":"","link_up":true,"internal_ipv4":"","full_ipv6":"","prefix_ipv6":"","port_number":0,"node":"node-1","simulation":"sim-1","outbound":true,"link":""}]}`))
-		case r.URL.Path == "/v1/service/" && r.Method == "POST":
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "POST":
 			if err := json.NewDecoder(r.Body).Decode(&gotCreateBody); err != nil {
 				t.Fatalf("failed to decode create service request: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"svc-1","name":"gpu-api","simulation":"sim-1","interface":"if-out","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}`))
+			_, _ = w.Write([]byte(`{"id":"svc-1","name":"gpu-api","interface":"if-out","node_port":20000,"worker_port":17922,"service_type":"OTHER","worker_fqdn":"worker01.air.nvidia.com"}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	ac := NewCommand()
 	ac.APIEndpoint = server.URL
@@ -119,11 +119,11 @@ func TestExecuteForward_SuccessAllocatesFirstAutoPort(t *testing.T) {
 		t.Fatalf("executeForward failed: %v", err)
 	}
 
-	if gotCreateBody["dest_port"] != float64(20000) {
-		t.Fatalf("expected dest_port=20000, got: %v", gotCreateBody["dest_port"])
+	if gotCreateBody["node_port"] != float64(20000) {
+		t.Fatalf("expected node_port=20000, got: %v", gotCreateBody["node_port"])
 	}
-	if gotCreateBody["service_type"] != "other" {
-		t.Fatalf("expected service_type=other, got: %v", gotCreateBody["service_type"])
+	if gotCreateBody["service_type"] != "OTHER" {
+		t.Fatalf("expected service_type=OTHER, got: %v", gotCreateBody["service_type"])
 	}
 	if gotCreateBody["name"] != "gpu-api" {
 		t.Fatalf("expected explicit forward name, got: %v", gotCreateBody["name"])
@@ -147,36 +147,36 @@ func TestExecuteForward_SkipsUsedPortsFromIPTablesComments(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v2/simulations" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
-		case r.URL.Path == "/v1/service" && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","name":"lab-a","state":"RUNNING"}]}`))
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
 				{"id":"svc-ssh","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","node_name":"oob-mgmt-server"}
 			]`))
-		case r.URL.Path == "/v2/simulations/nodes/" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":2,"results":[
 				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
 				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
-		case r.URL.Path == "/v2/simulations/nodes/interfaces" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/interfaces" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"if-out","name":"eth0","interface_type":"ETHERNET","mac_address":"","link_up":true,"internal_ipv4":"","full_ipv6":"","prefix_ipv6":"","port_number":0,"node":"node-1","simulation":"sim-1","outbound":true,"link":""}]}`))
-		case r.URL.Path == "/v1/service/" && r.Method == "POST":
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "POST":
 			if err := json.NewDecoder(r.Body).Decode(&gotCreateBody); err != nil {
 				t.Fatalf("failed to decode create service request: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"svc-3","name":"gpu-api","simulation":"sim-1","interface":"if-out","dest_port":20002,"src_port":17924,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}`))
+			_, _ = w.Write([]byte(`{"id":"svc-3","name":"gpu-api","interface":"if-out","node_port":20002,"worker_port":17924,"service_type":"OTHER","worker_fqdn":"worker01.air.nvidia.com"}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	ac := NewCommand()
 	ac.APIEndpoint = server.URL
@@ -189,8 +189,8 @@ func TestExecuteForward_SkipsUsedPortsFromIPTablesComments(t *testing.T) {
 		t.Fatalf("executeForward failed: %v", err)
 	}
 
-	if gotCreateBody["dest_port"] != float64(20002) {
-		t.Fatalf("expected dest_port=20002, got: %v", gotCreateBody["dest_port"])
+	if gotCreateBody["node_port"] != float64(20002) {
+		t.Fatalf("expected node_port=20002, got: %v", gotCreateBody["node_port"])
 	}
 	if gotCreateBody["name"] != "gpu-api" {
 		t.Fatalf("expected explicit forward name, got: %v", gotCreateBody["name"])
@@ -207,38 +207,38 @@ func TestExecuteForward_DoesNotReuseParsedForwardNameForSameDestination(t *testi
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v2/simulations" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
-		case r.URL.Path == "/v1/service" && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","name":"lab-a","state":"RUNNING"}]}`))
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
 				{"id":"svc-1","name":"old-style-gpu-api","simulation":"sim-1","dest_port":20005,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"},
 				{"id":"svc-ssh","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"}
 			]`))
-		case r.URL.Path == "/v2/simulations/nodes/" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":2,"results":[
 				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
 				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
-		case r.URL.Path == "/v2/simulations/nodes/interfaces" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/interfaces" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"if-out","name":"eth0","interface_type":"ETHERNET","mac_address":"","link_up":true,"internal_ipv4":"","full_ipv6":"","prefix_ipv6":"","port_number":0,"node":"node-1","simulation":"sim-1","outbound":true,"link":""}]}`))
-		case r.URL.Path == "/v1/service/" && r.Method == "POST":
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "POST":
 			createCalls++
 			if err := json.NewDecoder(r.Body).Decode(&gotCreateBody); err != nil {
 				t.Fatalf("failed to decode create service request: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"svc-2","name":"gpu-api","simulation":"sim-1","interface":"if-out","dest_port":20000,"src_port":17924,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}`))
+			_, _ = w.Write([]byte(`{"id":"svc-2","name":"gpu-api","interface":"if-out","node_port":20000,"worker_port":17924,"service_type":"OTHER","worker_fqdn":"worker01.air.nvidia.com"}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	ac := NewCommand()
 	ac.APIEndpoint = server.URL
@@ -253,8 +253,8 @@ func TestExecuteForward_DoesNotReuseParsedForwardNameForSameDestination(t *testi
 	if createCalls != 1 {
 		t.Fatalf("expected create call for explicit forward name, got %d", createCalls)
 	}
-	if gotCreateBody["dest_port"] != float64(20000) {
-		t.Fatalf("expected dest_port=20000, got: %v", gotCreateBody["dest_port"])
+	if gotCreateBody["node_port"] != float64(20000) {
+		t.Fatalf("expected node_port=20000, got: %v", gotCreateBody["node_port"])
 	}
 	if gotCreateBody["name"] != "gpu-api" {
 		t.Fatalf("expected explicit forward name, got: %v", gotCreateBody["name"])
@@ -277,22 +277,22 @@ func TestExecuteForward_RejectsExistingForwardNameForSameTarget(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v2/simulations" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
-		case r.URL.Path == "/v1/service" && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","name":"lab-a","state":"RUNNING"}]}`))
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
 				{"id":"svc-1","name":"gpu-api","simulation":"sim-1","dest_port":20005,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"},
 				{"id":"svc-ssh","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"}
 			]`))
-		case r.URL.Path == "/v2/simulations/nodes/" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":2,"results":[
 				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
 				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
-		case r.URL.Path == "/v1/service/" && r.Method == "POST":
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "POST":
 			createCalls++
 			http.Error(w, "unexpected create", http.StatusInternalServerError)
 		default:
@@ -301,7 +301,7 @@ func TestExecuteForward_RejectsExistingForwardNameForSameTarget(t *testing.T) {
 	}))
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	ac := NewCommand()
 	ac.APIEndpoint = server.URL
@@ -341,23 +341,23 @@ func TestExecuteForward_RejectsExistingForwardNameWithDifferentTarget(t *testing
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v2/simulations" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
-		case r.URL.Path == "/v1/service" && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","name":"lab-a","state":"RUNNING"}]}`))
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
 				{"id":"svc-1","name":"gpu-api","simulation":"sim-1","dest_port":20005,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"},
 				{"id":"svc-ssh","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","link":"ssh://ubuntu@worker01.air.nvidia.com:16821","node_name":"oob-mgmt-server"}
 			]`))
-		case r.URL.Path == "/v2/simulations/nodes/" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":3,"results":[
 				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
 				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"},
 				{"id":"node-3","name":"node-gpu-2","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.7\"}","os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
-		case r.URL.Path == "/v1/service/" && r.Method == "POST":
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "POST":
 			createCalls++
 			http.Error(w, "unexpected create", http.StatusInternalServerError)
 		default:
@@ -366,7 +366,7 @@ func TestExecuteForward_RejectsExistingForwardNameWithDifferentTarget(t *testing
 	}))
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	ac := NewCommand()
 	ac.APIEndpoint = server.URL
@@ -403,35 +403,35 @@ func TestExecuteForward_TargetBastionSSHUsesManagedForwardPath(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v2/simulations" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","title":"lab-a","state":"RUNNING"}]}`))
-		case r.URL.Path == "/v1/service" && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"sim-1","name":"lab-a","state":"RUNNING"}]}`))
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
 				{"id":"svc-ssh","name":"bastion-ssh","simulation":"sim-1","dest_port":22,"src_port":16821,"service_type":"ssh","host":"worker01.air.nvidia.com","node_name":"oob-mgmt-server"}
 			]`))
-		case r.URL.Path == "/v2/simulations/nodes/" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":1,"results":[
 				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.2\"}","os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
-		case r.URL.Path == "/v2/simulations/nodes/interfaces" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/interfaces" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"if-out","name":"eth0","interface_type":"ETHERNET","mac_address":"","link_up":true,"internal_ipv4":"","full_ipv6":"","prefix_ipv6":"","port_number":0,"node":"node-1","simulation":"sim-1","outbound":true,"link":""}]}`))
-		case r.URL.Path == "/v1/service/" && r.Method == "POST":
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "POST":
 			if err := json.NewDecoder(r.Body).Decode(&gotCreateBody); err != nil {
 				t.Fatalf("failed to decode create service request: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"svc-1","name":"bastion-ssh-forward","simulation":"sim-1","interface":"if-out","dest_port":20000,"src_port":17922,"service_type":"other","host":"worker01.air.nvidia.com","link":"","node_name":"oob-mgmt-server"}`))
+			_, _ = w.Write([]byte(`{"id":"svc-1","name":"bastion-ssh-forward","interface":"if-out","node_port":20000,"worker_port":17922,"service_type":"OTHER","worker_fqdn":"worker01.air.nvidia.com"}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	ac := NewCommand()
 	ac.APIEndpoint = server.URL
@@ -444,11 +444,11 @@ func TestExecuteForward_TargetBastionSSHUsesManagedForwardPath(t *testing.T) {
 		t.Fatalf("executeForward failed: %v", err)
 	}
 
-	if gotCreateBody["dest_port"] != float64(20000) {
-		t.Fatalf("expected dest_port=20000, got: %v", gotCreateBody["dest_port"])
+	if gotCreateBody["node_port"] != float64(20000) {
+		t.Fatalf("expected node_port=20000, got: %v", gotCreateBody["node_port"])
 	}
-	if gotCreateBody["service_type"] != "other" {
-		t.Fatalf("expected service_type=other, got: %v", gotCreateBody["service_type"])
+	if gotCreateBody["service_type"] != "OTHER" {
+		t.Fatalf("expected service_type=OTHER, got: %v", gotCreateBody["service_type"])
 	}
 	if gotCreateBody["name"] != "bastion-ssh-forward" {
 		t.Fatalf("expected explicit bastion forward name, got: %v", gotCreateBody["name"])
@@ -497,7 +497,7 @@ func TestExecuteForward_InvalidTargetPort(t *testing.T) {
 
 func TestFindSSHService_UsesOOBMgmtServerService(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/service" {
+		if r.URL.Path != "/v3/simulations/nodes/interfaces/services/" {
 			http.NotFound(w, r)
 			return
 		}
@@ -520,17 +520,15 @@ func TestFindSSHService_UsesOOBMgmtServerService(t *testing.T) {
 	}
 }
 
-func setupConfig(t *testing.T, endpoint, bearer string, expiresAt time.Time) {
+func setupConfig(t *testing.T, endpoint, apiToken string, _ time.Time) {
 	t.Helper()
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 
 	cfg := &config.Config{
-		Username:             "user@example.com",
-		APIToken:             "api-token",
-		BearerToken:          bearer,
-		BearerTokenExpiresAt: expiresAt,
-		APIEndpoint:          endpoint,
+		Username:    "user@example.com",
+		APIToken:    apiToken,
+		APIEndpoint: endpoint,
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("failed to save config: %v", err)

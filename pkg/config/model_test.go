@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/unifabric-io/nvair-cli/pkg/constant"
 )
@@ -42,14 +41,10 @@ func TestSaveAndLoad(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", originalHome)
 
-	// Create a config
-	expiresAt := time.Now().Add(24 * time.Hour)
 	cfg := &Config{
-		Username:             "test@example.com",
-		APIToken:             "test-api-token",
-		BearerToken:          "test-bearer-token",
-		BearerTokenExpiresAt: expiresAt,
-		APIEndpoint:          "https://air.nvidia.com/api",
+		Username:    "test@example.com",
+		APIToken:    "test-api-token",
+		APIEndpoint: "https://api.dsx-air.nvidia.com/api",
 	}
 
 	// Save the config
@@ -70,15 +65,8 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded.APIToken != cfg.APIToken {
 		t.Errorf("APIToken mismatch: got %q, want %q", loaded.APIToken, cfg.APIToken)
 	}
-	if loaded.BearerToken != cfg.BearerToken {
-		t.Errorf("BearerToken mismatch: got %q, want %q", loaded.BearerToken, cfg.BearerToken)
-	}
 	if loaded.APIEndpoint != cfg.APIEndpoint {
 		t.Errorf("APIEndpoint mismatch: got %q, want %q", loaded.APIEndpoint, cfg.APIEndpoint)
-	}
-	// Compare timestamps with tolerance due to JSON serialization
-	if loaded.BearerTokenExpiresAt.Unix() != cfg.BearerTokenExpiresAt.Unix() {
-		t.Errorf("BearerTokenExpiresAt mismatch: got %v, want %v", loaded.BearerTokenExpiresAt, cfg.BearerTokenExpiresAt)
 	}
 }
 
@@ -95,11 +83,9 @@ func TestSaveFilePermissions(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 
 	cfg := &Config{
-		Username:             "test@example.com",
-		APIToken:             "test-api-token",
-		BearerToken:          "test-bearer-token",
-		BearerTokenExpiresAt: time.Now().Add(24 * time.Hour),
-		APIEndpoint:          "https://air.nvidia.com/api",
+		Username:    "test@example.com",
+		APIToken:    "test-api-token",
+		APIEndpoint: "https://api.dsx-air.nvidia.com/api",
 	}
 
 	if err := cfg.Save(); err != nil {
@@ -118,35 +104,6 @@ func TestSaveFilePermissions(t *testing.T) {
 	actualMode := info.Mode() & os.ModePerm
 	if actualMode != expectedMode {
 		t.Errorf("Config file permissions mismatch: got %#o, want %#o", actualMode, expectedMode)
-	}
-}
-
-// TestIsTokenExpired tests the IsTokenExpired method.
-func TestIsTokenExpired(t *testing.T) {
-	now := time.Now()
-
-	// Token expired in the past
-	cfg := &Config{
-		BearerTokenExpiresAt: now.Add(-1 * time.Hour),
-	}
-	if !cfg.IsTokenExpired(now) {
-		t.Error("Expected token to be expired, but IsTokenExpired returned false")
-	}
-
-	// Token expires in the future
-	cfg = &Config{
-		BearerTokenExpiresAt: now.Add(1 * time.Hour),
-	}
-	if cfg.IsTokenExpired(now) {
-		t.Error("Expected token to be valid, but IsTokenExpired returned true")
-	}
-
-	// Token expires exactly now (edge case)
-	cfg = &Config{
-		BearerTokenExpiresAt: now,
-	}
-	if !cfg.IsTokenExpired(now) {
-		t.Error("Expected token expiring at 'now' to be expired")
 	}
 }
 
@@ -186,11 +143,9 @@ func TestSaveCreatesDirectory(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 
 	cfg := &Config{
-		Username:             "test@example.com",
-		APIToken:             "test-api-token",
-		BearerToken:          "test-bearer-token",
-		BearerTokenExpiresAt: time.Now().Add(24 * time.Hour),
-		APIEndpoint:          "https://air.nvidia.com/api",
+		Username:    "test@example.com",
+		APIToken:    "test-api-token",
+		APIEndpoint: "https://api.dsx-air.nvidia.com/api",
 	}
 
 	// Verify directory doesn't exist before save

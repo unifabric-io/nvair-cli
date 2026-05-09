@@ -122,7 +122,7 @@ func TestExecute_UploadUsesResolvedCredentials(t *testing.T) {
 	}, []map[string]interface{}{{"id": "img-ubuntu", "name": "generic/ubuntu2404"}})
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	tmpDir := t.TempDir()
 	localFile := filepath.Join(tmpDir, "upload.txt")
@@ -193,7 +193,7 @@ func TestExecute_DownloadFromBastionNodeUsesDirectTarget(t *testing.T) {
 	}, []map[string]interface{}{{"id": "img-ubuntu", "name": "generic/ubuntu2404"}})
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	oldKeyPathFn := defaultKeyPathFn
 	defaultKeyPathFn = func() (string, error) { return "/tmp/mock-key", nil }
@@ -263,13 +263,13 @@ func TestExecute_Validation(t *testing.T) {
 
 func TestExecute_RequiresSimulationWhenMultipleExist(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/simulations" && r.Method == "GET" {
+		if r.URL.Path == "/v3/simulations" && r.Method == "GET" {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"count": 2,
 				"results": []map[string]interface{}{
-					{"id": "sim-1", "title": "simple", "state": "RUNNING"},
-					{"id": "sim-2", "title": "lab-b", "state": "RUNNING"},
+					{"id": "sim-1", "name": "simple", "state": "RUNNING"},
+					{"id": "sim-2", "name": "lab-b", "state": "RUNNING"},
 				},
 			})
 			return
@@ -278,7 +278,7 @@ func TestExecute_RequiresSimulationWhenMultipleExist(t *testing.T) {
 	}))
 	defer server.Close()
 
-	setupConfig(t, server.URL, "bearer-token", time.Now().Add(1*time.Hour))
+	setupConfig(t, server.URL, "api-token", time.Now().Add(1*time.Hour))
 
 	tmpDir := t.TempDir()
 	localFile := filepath.Join(tmpDir, "upload.txt")
@@ -303,31 +303,32 @@ func newCopyTestServer(t *testing.T, nodes []map[string]interface{}, images []ma
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v2/simulations" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"count": 1,
 				"results": []map[string]interface{}{
-					{"id": "sim-1", "title": "simple", "state": "RUNNING"},
+					{"id": "sim-1", "name": "simple", "state": "RUNNING"},
 				},
 			})
-		case r.URL.Path == "/v1/service" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{
 					"id":           "svc-1",
+					"name":         "oob-mgmt-server SSH",
 					"service_type": "ssh",
 					"host":         "worker01.air.nvidia.com",
 					"src_port":     10022,
 				},
 			})
-		case r.URL.Path == "/v2/simulations/nodes/" && r.Method == "GET":
+		case r.URL.Path == "/v3/simulations/nodes/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"count":   len(nodes),
 				"results": nodes,
 			})
-		case r.URL.Path == "/v2/images" && r.Method == "GET":
+		case r.URL.Path == "/v3/images" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"count":   len(images),
@@ -339,17 +340,15 @@ func newCopyTestServer(t *testing.T, nodes []map[string]interface{}, images []ma
 	}))
 }
 
-func setupConfig(t *testing.T, endpoint, bearer string, expiresAt time.Time) {
+func setupConfig(t *testing.T, endpoint, apiToken string, _ time.Time) {
 	t.Helper()
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 
 	cfg := &config.Config{
-		Username:             "user@example.com",
-		APIToken:             "api-token",
-		BearerToken:          bearer,
-		BearerTokenExpiresAt: expiresAt,
-		APIEndpoint:          endpoint,
+		Username:    "user@example.com",
+		APIToken:    apiToken,
+		APIEndpoint: endpoint,
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("failed to save config: %v", err)

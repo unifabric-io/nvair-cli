@@ -1,362 +1,344 @@
 # API Contracts
 
-**Status**: Complete  
-**Generated**: January 9, 2026  
-**Base URL**: `https://air.nvidia.com/api`  
-**Authentication**: Bearer Token (OAuth2)  
-**Swagger Documentation**: https://air.nvidia.com/api/
+**Status**: Current  
+**Base URL**: `https://api.dsx-air.nvidia.com/api`  
+**Authentication**: `Authorization: Bearer <apiToken>`
 
-All requests must include: `Authorization: Bearer <token>`
-
----
-
-## 1. Authentication Endpoint
-
-### POST /v1/auth/login
-
-Exchange username and API token for bearer token.
-
-Request:
-```json
-{
-    "username": "example@example.com",
-    "password": "YzVhYWQ0M2UtNjY0ZC00NzgwLWI4YTktNDI5MmZlZGU5MTRh" # api token
-}
-```
-
-Response (200 OK):
-```json
-{
-    "result": "OK",
-    "message": "Successfully logged in.",
-    "token": "base64-1.base64-2.base64-3"
-}
-```
-
-After being base64 decoding, the result is as follows:
-```json
-{
-  "account": "b0fb214a-8b3d-44d9-0000-50a743b37945",
-  "realm": "api",
-  "exp": 1766735420,
-  "admin": false,
-  "staff": false,
-  "jti": "cf9ba7d382274a3492fc585ed8070000",
-  "token_type": "access"
-}
-```
-
-HTTP Status Codes:
-- `200 OK`: Successful authentication
-- `400 Bad Request`: Missing required fields
-- `401 Unauthorized`: Invalid credentials
-- `429 Too Many Requests`: Rate limited (retry after X seconds)
+This document only records the dsx-air API endpoints currently used by the CLI.
+Old v1/v2 contracts and no-longer-used endpoints have been removed.
 
 ---
 
-## 2. SSH Public Key Management
+## Authentication Model
 
-### GET /v1/sshkey
+The CLI uses the user-provided API token directly as a bearer token.
+There is no separate login-exchange API in the current implementation.
 
-List all SSH public keys associated with the user's account.
+Request header:
 
-Response (200 OK):
+```http
+Authorization: Bearer <apiToken>
+Content-Type: application/json
+```
+
+---
+
+## SSH Key Management
+
+Used by `nvair login`.
+
+### GET `/v3/users/ssh-keys/?limit=`
+
+List the current user's SSH public keys.
+
+CLI use:
+- Find an existing key by `name`
+- Compare fingerprints before upload
+
+Relevant response fields:
+
 ```json
-[
+{
+  "count": 1,
+  "results": [
     {
-        "id": "9f40cda4-9562-4937-955c-86e65e917a61",
-        "url": "https://air.nvidia.com/api/v1/sshkey/9f40cda4-9562-4937-955c-86e65e917a61/",
-        "account": "https://air.nvidia.com/api/v1/account/b0fb214a-8b3d-44d9-9ce3-50a743b37965/",
-        "name": "nvair.unifabric.io-cli",
-        "fingerprint": "qe2hUthJPcQ2UWhGCi5Sl5NBYX3F2SZbwY5PhKO1Jfc="
+      "id": "9f40cda4-9562-4937-955c-86e65e917a61",
+      "created": "2026-05-09T08:00:00Z",
+      "name": "nvair.unifabric.io-cli",
+      "fingerprint": "qe2hUthJPcQ2UWhGCi5Sl5NBYX3F2SZbwY5PhKO1Jfc="
     }
-]
+  ]
+}
 ```
 
-**Notes**:
-- Response is an array of SSH key objects
-- `fingerprint` is base64-encoded
-- `name` is used to identify the key (e.g., "nvair.unifabric.io-cli")
+### POST `/v3/users/ssh-keys/`
 
-### POST /v1/sshkey
-
-Upload a new SSH public key to the user's account.
+Upload a new SSH public key.
 
 Request:
+
 ```json
 {
-  "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@host",
+  "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...",
   "name": "nvair.unifabric.io-cli"
 }
 ```
 
-Response (201 Created):
-```json
-{
-    "id": "9f40cda4-9562-4937-955c-86e65e917a41",
-    "url": "https://air.nvidia.com/api/v1/sshkey/9f40cda4-9562-4937-955c-86e65e917a41/",
-    "account": "https://air.nvidia.com/api/v1/account/b0fb214a-8b3d-44d9-9ce3-50a743b37945/",
-    "name": "nvair.unifabric.io-cli",
-    "fingerprint": "qe2hUthJPcQ2UWhGCi5Sl5NBYX3F2SZbwY5PhKO1Jfc="
-}
-```
+### DELETE `/v3/users/ssh-keys/{id}/`
 
-HTTP Status Codes:
-- `201 Created`: Key uploaded successfully
-- `400 Bad Request`: Invalid key format or missing required fields
-- `409 Conflict`: Key with same name and fingerprint already exists
-
-**Notes**:
-- Use `name` field to identify the key source (recommended: "nvair.unifabric.io-cli")
-- CLI should check for existing keys with matching `name` and `fingerprint` before uploading
+Delete an existing SSH key by ID.
 
 ---
 
-## 3. Simulation Endpoints
+## Simulations
 
-### POST /v2/simulations
+Used by `nvair create`, `nvair get simulations`, `nvair delete simulation`, `nvair status`, and simulation resolution logic shared by other commands.
 
-Create a new simulation from topology file.
+### GET `/v3/simulations`
+
+List simulations visible to the current user.
+
+Relevant response fields:
+
+```json
+{
+  "count": 1,
+  "results": [
+    {
+      "id": "87eece83-83f0-4ccb-92ab-258fcbab4d3b",
+      "name": "demo",
+      "state": "ACTIVE",
+      "created": "2026-05-09T09:20:02.477033Z"
+    }
+  ]
+}
+```
+
+### GET `/v3/simulations/{simulation-id}/`
+
+Fetch a single simulation.
+
+CLI use:
+- Poll imported simulations until `INACTIVE`
+- Poll started simulations until `ACTIVE`
+
+Relevant response fields:
+
+```json
+{
+  "id": "a616954f-03fa-4140-bbed-564b30980150",
+  "name": "simple",
+  "state": "REQUESTING",
+  "created": "2026-05-09T09:20:02.477033Z"
+}
+```
+
+### POST `/v3/simulations/import/`
+
+Create a simulation by uploading the topology payload.
+
+Request body:
+- The CLI sends the parsed `topology.json` document directly.
+
+Relevant response fields:
+
+```json
+{
+  "id": "ff5124ff-96d3-489e-8185-fd3075ca377e",
+  "title": "simple"
+}
+```
+
+### PATCH `/v3/simulations/{simulation-id}/start/`
+
+Start a simulation after it reaches `INACTIVE`.
 
 Request:
+
 ```json
 {}
 ```
 
-Response (201 Created):
-```json
-{
-  "id": "63c77456-c2b5-46ed-b610-f6f2bc77665b",
-  "title": "demo"
-}
-```
-
-HTTP Status Codes:
-- `201 Created`: Simulation created successfully
-- `400 Bad Request`: Invalid topology or parameters
-- `403 Forbidden`: User quota exceeded
-- `422 Unprocessable Entity`: Topology validation failed
-
-
-### GET /v2/simulations
-
-List simulations.
-
-Response (200 Created):
+Relevant response fields:
 
 ```json
 {
-    "count": 1,
-    "next": null,
-    "previous": null,
-    "results": [
-        {
-          "cloned": false,
-          "created": "2026-01-06T08:06:46.262185Z",
-          "documentation": null,
-          "expires": true,
-          "expires_at": "2026-01-20T08:06:46.261668Z",
-          "id": "87eece83-83f0-4ccb-92ab-258fcbab4d3b",
-          "metadata": null,
-          "modified": "2026-01-09T14:24:30.720428Z",
-          "node_count": 11,
-          "netq_auto_enabled": false,
-          "netq_username": "example+87eece83@example.com",
-          "netq_password": "Xl&4pfmD",
-          "oob_auto_enabled": true,
-          "organization": null,
-          "organization_name": null,
-          "owner": "example@example.com",
-          "sleep": true,
-          "sleep_at": "2026-01-09T14:23:18.313695Z",
-          "state": "STORED",
-          "title": "demo",
-          "write_ok": true
-        }
-    ]
+  "id": "a616954f-03fa-4140-bbed-564b30980150",
+  "name": "simple",
+  "state": "REQUESTING"
 }
 ```
 
+### DELETE `/v3/simulations/{simulation-id}/`
 
-### POST /api/v2/simulations/{simulation-id}/load
+Delete a simulation by ID.
 
-Wake up a simulation
-
-Response (200 No Response)
-
-
-### DELETE /api/v2/simulations/{simulation-id}
-
-Delete an existing simulation
-
-Response (204 No Response)
-
-
-### GET /api/v2/simulations/nodes?simulation={simulation-id}&ordering=os
-
-List simulation nodes
-
-```json
-{
-  "count": 123,
-  "next": "http://api.example.org/accounts/?offset=400&limit=100",
-  "previous": "http://api.example.org/accounts/?offset=200&limit=100",
-  "results": [
-    {
-      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "created": "2026-01-12T03:46:19.897Z",
-      "modified": "2026-01-12T03:46:19.897Z",
-      "simulation": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "worker": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "console_port": 2147483647,
-      "serial_port": 2147483647,
-      "state": "RUNNING",
-      "console_username": "string",
-      "console_password": "string",
-      "name": "string",
-      "os": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "memory": 0,
-      "storage": 0,
-      "cpu": 0,
-      "metadata": "string",
-      "version": 0,
-      "features": "string",
-      "pos_x": 0,
-      "pos_y": 0,
-      "system": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "boot_group": 0,
-      "console_url": "string"
-    }
-  ]
-}
-```
-
-### /v2/simulations/nodes/interfaces?simulation={simulation-id}&node={node-id}
-
-List node interfaces.
-
-```json
-{
-  "count": 123,
-  "next": "http://api.example.org/accounts/?offset=400&limit=100",
-  "previous": "http://api.example.org/accounts/?offset=200&limit=100",
-  "results": [
-    {
-      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "link_up": true,
-      "internal_ipv4": "198.51.100.42",
-      "full_ipv6": "2001:0db8:5b96:0000:0000:426f:8e17:642a",
-      "prefix_ipv6": "2001:0db8:5b96:0000:0000:426f:8e17:642a",
-      "port_number": 2147483647,
-      "node": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "simulation": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "breakout": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "name": "string",
-      "interface_type": "DATA_PLANE_INTF",
-      "mac_address": "string",
-      "preserve_mac": true,
-      "outbound": true,
-      "link": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
-    }
-  ]
-}
-```
-
-### POST /v1/service
-
-Enable ssh forward
-
-Request:
-```json
-{
-    "name": "bastion-ssh",
-    "simulation": "87eece83-83f0-4ccb-92ab-258fcbab4d3b",
-    "interface": "ac6975d0-b988-40ec-90e2-b59f0d006064",
-    "dest_port": 22,
-    "service_type": "ssh"
-}
-```
-
-Response (201 Created):
-```json
-{
-    "url": "https://air.nvidia.com/api/v1/service/aeeca4f4-c22c-4bf3-84df-ff80ccf4f9ee/",
-    "id": "aeeca4f4-c22c-4bf3-84df-ff80ccf4f9ee",
-    "name": "bastion-ssh",
-    "simulation": "https://air.nvidia.com/api/v1/simulation/87eece83-83f0-4ccb-92ab-258fcbab4d3b/",
-    "interface": "https://air.nvidia.com/api/v1/simulation-interface/ac6975d0-b988-40ec-90e2-b59f0d006064/",
-    "dest_port": 22,
-    "src_port": 16821,
-    "link": "ssh://ubuntu@worker01.air.nvidia.com:16821",
-    "service_type": "ssh",
-    "node_name": "oob-mgmt-server",
-    "interface_name": "eth0",
-    "host": "worker01.air.nvidia.com",
-    "os_default_username": "ubuntu"
-}
-```
-
-### GET /v1/service
-
-List all services for a simulation.
-
-Query Parameters:
-- `simulation`: Simulation ID (required)
-
-Response (200 OK):
-```json
-[
-  {
-    "id": "aeeca4f4-c22c-4bf3-84df-ff80ccf4f9ee",
-    "name": "bastion-ssh",
-    "simulation": "87eece83-83f0-4ccb-92ab-258fcbab4d3b",
-    "interface": "ac6975d0-b988-40ec-90e2-b59f0d006064",
-    "dest_port": 22,
-    "src_port": 16821,
-    "link": "ssh://ubuntu@worker01.air.nvidia.com:16821",
-    "service_type": "ssh",
-    "node_name": "oob-mgmt-server"
-  },
-  {
-    "id": "bbf3c5e5-d33d-5ecf-a3bc-539g1fef92ff",
-    "name": "k8s-default-my-web-app-30080",
-    "simulation": "87eece83-83f0-4ccb-92ab-258fcbab4d3b",
-    "interface": "bd7086e1-c099-51fd-b1cd-64a18f4d93fe",
-    "dest_port": 30080,
-    "src_port": 17922,
-    "link": "http://worker01.air.nvidia.com:17922",
-    "service_type": "tcp",
-    "node_name": "bastion-host"
-  }
-]
-```
-
-**Note**: Services synced from Kubernetes have `k8s-` prefix (e.g., `k8s-default-my-web-app-30080`).
-
-### DELETE /v1/service/{service-id}
-
-Delete a service forwarding rule.
-
-Response (204 No Content)
+CLI note:
+- `nvair delete simulation <name>` first resolves the simulation name with `GET /v3/simulations`, then deletes by ID.
 
 ---
 
-## 9. Get SSH Private Key
+## Nodes
 
-### GET /v2/simulations/{simulation-id}/ssh-key
+Used by `nvair create`, `nvair get nodes`, `nvair get simulations`, `nvair exec`, `nvair cp`, and `nvair add forward`.
 
-Retrieve SSH private key for accessing simulation nodes.
+### GET `/v3/simulations/nodes/?simulation={simulation-id}&ordering=image&limit={max}`
 
-Response (200 OK):
+List nodes for one simulation.
+
+Current CLI query parameters:
+- `simulation`: required
+- `ordering=image`: preferred server-side grouping by image
+- `limit=<max int>`: fetch all rows in one request
+
+Relevant response fields:
+
 ```json
 {
-  "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA...\n-----END OPENSSH PRIVATE KEY-----\n",
-  "key_type": "ed25519",
-  "default_password": "initial-password-123"
+  "count": 2,
+  "results": [
+    {
+      "id": "node-1",
+      "name": "node-gpu-1",
+      "state": "ACTIVE",
+      "simulation": "sim-1",
+      "image": "img-ubuntu",
+      "management_ip": "192.168.200.6",
+      "metadata": null
+    },
+    {
+      "id": "node-2",
+      "name": "switch-gpu-leaf1",
+      "state": "ACTIVE",
+      "simulation": "sim-1",
+      "image": "img-cumulus",
+      "management_ip": "192.168.200.111",
+      "metadata": {
+        "legacy": "value"
+      }
+    }
+  ]
 }
 ```
 
-**Notes**:
-- Private key is used to access the bastion host (oob-mgmt-server)
-- `default_password` is the initial bastion password that should be changed on first use
-- Keys are simulation-specific
+CLI notes:
+- New API uses top-level `image`
+- New API uses top-level `management_ip`
+- CLI still falls back to legacy `os` and `metadata.mgmt_ip` when needed
+
+### GET `/v3/simulations/nodes/?ordering=image&limit={max}`
+
+List nodes across all simulations.
+
+Used by:
+- `nvair get simulations`
+
+---
+
+## Images
+
+Used to resolve node image IDs into human-readable names.
+
+### GET `/v3/images?limit={max}`
+
+Relevant response fields:
+
+```json
+{
+  "count": 2,
+  "results": [
+    {
+      "id": "img-cumulus",
+      "name": "cumulus-vx-5.15.0"
+    },
+    {
+      "id": "img-ubuntu",
+      "name": "generic/ubuntu2404"
+    }
+  ]
+}
+```
+
+Used by:
+- `nvair create`
+- `nvair get simulations`
+- `nvair get nodes`
+- `nvair exec`
+- `nvair cp`
+
+---
+
+## Node Interfaces
+
+Used by `nvair create` and `nvair add forward` to find the outbound interface on `oob-mgmt-server`.
+
+### GET `/v3/simulations/nodes/interfaces?simulation={simulation-id}&node={node-id}`
+
+Relevant response fields:
+
+```json
+{
+  "results": [
+    {
+      "id": "abd681e9-3e2d-40a9-83b8-97ab33fe0ed6",
+      "name": "eth0",
+      "interface_type": "MGMT",
+      "mac_address": "52:54:00:12:34:56",
+      "link_up": true,
+      "internal_ipv4": "192.168.200.1",
+      "simulation": "sim-1",
+      "node": "node-1",
+      "outbound": true
+    }
+  ]
+}
+```
+
+---
+
+## Interface Services / Forwards
+
+Used by `nvair create`, `nvair add forward`, `nvair get forward`, `nvair delete forward`, and `nvair print-ssh-command`.
+
+### GET `/v3/simulations/nodes/interfaces/services/?simulation={simulation-id}&limit=25`
+
+List services for a simulation.
+
+Relevant response fields:
+
+```json
+{
+  "count": 2,
+  "results": [
+    {
+      "id": "svc-1",
+      "name": "bastion-ssh",
+      "interface": "if-out",
+      "service_type": "SSH",
+      "node_port": 22,
+      "worker_port": 16821,
+      "worker_fqdn": "worker01.air.nvidia.com",
+      "host": "worker01.air.nvidia.com",
+      "link": "ssh://ubuntu@worker01.air.nvidia.com:16821"
+    }
+  ]
+}
+```
+
+CLI notes:
+- The API may return either paginated `{count, results}` or a plain array
+- The CLI normalizes `node_port -> dest_port`, `worker_port -> src_port`, and `worker_fqdn -> host`
+
+### POST `/v3/simulations/nodes/interfaces/services/`
+
+Create a new service on a node interface.
+
+Request:
+
+```json
+{
+  "name": "bastion-ssh",
+  "interface": "abd681e9-3e2d-40a9-83b8-97ab33fe0ed6",
+  "node_port": 22,
+  "service_type": "SSH"
+}
+```
+
+CLI notes:
+- `service_type` is normalized by the CLI to `SSH`, `HTTP`, `HTTPS`, or `OTHER`
+- `nvair create` uses this endpoint to create the bastion SSH service
+- `nvair add forward` uses the same endpoint for named forwards
+
+### DELETE `/v3/simulations/nodes/interfaces/services/{service-id}/`
+
+Delete a service by ID.
+
+CLI note:
+- `nvair delete forward <name>` first resolves the target service via `GET .../services/?simulation=...`, then deletes by ID
+
+---
+
+## Scope
+
+This document is intentionally limited to endpoints that are part of the current CLI flow.
+Historical contracts and unused client-side experiments are not recorded here.

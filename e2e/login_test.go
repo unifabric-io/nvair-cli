@@ -14,16 +14,13 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	sshpkg "github.com/unifabric-io/nvair-cli/pkg/ssh"
-	"github.com/unifabric-io/nvair-cli/pkg/testutil"
 )
 
 // MockAPIServer represents a mock NVIDIA Air API server for testing
 type MockAPIServer struct {
 	server         *httptest.Server
-	loginCalls     int
 	getKeyCalls    int
 	createKeyCalls int
 }
@@ -38,9 +35,9 @@ func NewMockAPIServer() *MockAPIServer {
 // handleRequest routes requests to appropriate handlers
 func (mas *MockAPIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-	case "/v1/login/":
-		mas.handleLogin(w, r)
-	case "/v1/sshkey", "/v1/sshkey/":
+	case "/v3/login/":
+		http.Error(w, "login endpoint should not be called", http.StatusInternalServerError)
+	case "/v3/users/ssh-keys", "/v3/users/ssh-keys/":
 		if r.Method == "GET" {
 			mas.handleGetSSHKeys(w, r)
 		} else if r.Method == "POST" {
@@ -49,39 +46,6 @@ func (mas *MockAPIServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 	default:
 		http.NotFound(w, r)
 	}
-}
-
-// handleLogin mocks the authentication endpoint
-func (mas *MockAPIServer) handleLogin(w http.ResponseWriter, r *http.Request) {
-	mas.loginCalls++
-
-	var req map[string]string
-	json.NewDecoder(r.Body).Decode(&req)
-
-	// Simulate specific test scenarios
-	if req["username"] == "test-transient-error@example.com" && mas.loginCalls < 2 {
-		// First attempt fails with 503
-		w.WriteHeader(http.StatusServiceUnavailable)
-		return
-	}
-
-	if req["username"] == "test-auth-error@example.com" {
-		// Authentication always fails
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "Invalid credentials"}`))
-		return
-	}
-
-	// Success case with a JWT token carrying a near-term expiration
-	expiresAt := time.Now().Add(24 * time.Hour)
-	resp := map[string]interface{}{
-		"result":  "OK",
-		"message": "Successfully logged in.",
-		"token":   testutil.MakeTestJWT(expiresAt),
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
 }
 
 // handleGetSSHKeys mocks the get SSH keys endpoint
@@ -93,6 +57,10 @@ func (mas *MockAPIServer) handleGetSSHKeys(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if r.Header.Get("Authorization") == "Bearer wrong-token" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	// Check for specific test scenarios in query params
 	testCase := r.URL.Query().Get("test_case")
@@ -100,35 +68,45 @@ func (mas *MockAPIServer) handleGetSSHKeys(w http.ResponseWriter, r *http.Reques
 	switch testCase {
 	case "has_existing_key":
 		// Return existing SSH key
-		keys := []map[string]string{
-			{
-				"id":          "existing-key-id",
-				"name":        "nvair-cli",
-				"fingerprint": "qe2hUthJPcQ2UWhGCi5Sl5NBYX3F2SZbwY5PhKO1Jfc=",
+		resp := map[string]interface{}{
+			"count":    1,
+			"next":     nil,
+			"previous": nil,
+			"results": []map[string]string{
+				{
+					"id":          "existing-key-id",
+					"name":        "nvair-cli",
+					"fingerprint": "qe2hUthJPcQ2UWhGCi5Sl5NBYX3F2SZbwY5PhKO1Jfc=",
+				},
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(keys)
+		json.NewEncoder(w).Encode(resp)
 
 	case "key_conflict":
 		// Return key with same name but different fingerprint
-		keys := []map[string]string{
-			{
-				"id":          "different-key-id",
-				"name":        "nvair-cli",
-				"fingerprint": "different-fingerprint-hash",
+		resp := map[string]interface{}{
+			"count":    1,
+			"next":     nil,
+			"previous": nil,
+			"results": []map[string]string{
+				{
+					"id":          "different-key-id",
+					"name":        "nvair-cli",
+					"fingerprint": "different-fingerprint-hash",
+				},
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(keys)
+		json.NewEncoder(w).Encode(resp)
 
 	default:
 		// No keys found
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("[]"))
+		w.Write([]byte(`{"count":0,"next":null,"previous":null,"results":[]}`))
 	}
 }
 
@@ -138,6 +116,10 @@ func (mas *MockAPIServer) handleCreateSSHKey(w http.ResponseWriter, r *http.Requ
 
 	// Check authorization header
 	if r.Header.Get("Authorization") == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Header.Get("Authorization") == "Bearer wrong-token" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -177,7 +159,6 @@ func (mas *MockAPIServer) Close() {
 // Stats returns the call statistics
 func (mas *MockAPIServer) Stats() map[string]int {
 	return map[string]int{
-		"login_calls":      mas.loginCalls,
 		"get_key_calls":    mas.getKeyCalls,
 		"create_key_calls": mas.createKeyCalls,
 	}
@@ -360,9 +341,6 @@ func TestIntegration_SuccessfulLogin(t *testing.T) {
 
 	// Verify statistics
 	stats := mockServer.Stats()
-	if stats["login_calls"] != 1 {
-		t.Errorf("Expected 1 login call, got %d", stats["login_calls"])
-	}
 	if stats["get_key_calls"] < 1 {
 		t.Errorf("Expected at least 1 get key call, got %d", stats["get_key_calls"])
 	}
@@ -383,14 +361,13 @@ func TestIntegration_SuccessfulLogin(t *testing.T) {
 	}
 
 	t.Logf("✓ Successful login test passed")
-	t.Logf("  - Login calls: %d", stats["login_calls"])
 	t.Logf("  - Get key calls: %d", stats["get_key_calls"])
 	t.Logf("  - Create key calls: %d", stats["create_key_calls"])
 	t.Logf("  - Config file size: %d bytes", len(configData))
 }
 
-// TestIntegration_TransientFailure tests retry logic on transient errors
-func TestIntegration_TransientFailure(t *testing.T) {
+// TestIntegration_DirectKeyLogin verifies login uses the provided key directly.
+func TestIntegration_DirectKeyLogin(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
@@ -404,34 +381,34 @@ func TestIntegration_TransientFailure(t *testing.T) {
 	mockServer := NewMockAPIServer()
 	defer mockServer.Close()
 
-	// Execute login command with transient error scenario via compiled binary
+	// Execute login command via compiled binary.
 	env := append(os.Environ(), fmt.Sprintf("HOME=%s", tmpDir))
 	result := runCommand(t, env,
 		"login",
-		"-u", "test-transient-error@example.com",
+		"-u", "test-direct-key@example.com",
 		"-p", "test-api-token",
 		"--api-endpoint", mockServer.URL())
 
-	logCommandOutput(t, result, "TestIntegration_TransientFailure")
+	logCommandOutput(t, result, "TestIntegration_DirectKeyLogin")
 
 	if result.ExitCode != 0 {
 		t.Fatalf("Login failed with exit code %d", result.ExitCode)
 	}
 
-	// Verify retry logic was triggered with verbose logs
+	// Verify verbose logs were emitted.
 	expectedLogs := []string{
-		"[DEBUG]", // Should have debug logs showing retry logic
+		"[DEBUG]",
 	}
 	mustContainInOutput(t, result, expectedLogs, "combined")
 
-	// Verify retry logic was triggered
+	// Verify direct API key login used SSH-key endpoints and not the login endpoint.
 	stats := mockServer.Stats()
-	if stats["login_calls"] < 2 {
-		t.Errorf("Expected at least 2 login calls (retry), got %d", stats["login_calls"])
+	if stats["get_key_calls"] < 1 {
+		t.Errorf("Expected at least 1 get key call, got %d", stats["get_key_calls"])
 	}
 
-	t.Logf("✓ Transient failure retry test passed")
-	t.Logf("  - Login calls (with retry): %d", stats["login_calls"])
+	t.Logf("✓ Direct key login test passed")
+	t.Logf("  - Get key calls: %d", stats["get_key_calls"])
 }
 
 // TestIntegration_AuthenticationFailure tests handling of authentication errors
@@ -469,11 +446,6 @@ func TestIntegration_AuthenticationFailure(t *testing.T) {
 	}
 	mustContainInOutput(t, result, expectedErrors, "combined")
 
-	stats := mockServer.Stats()
-	if stats["login_calls"] != 1 {
-		t.Errorf("Expected 1 login call, got %d", stats["login_calls"])
-	}
-
 	t.Logf("✓ Authentication failure test passed")
 	t.Logf("  - Correctly rejected invalid credentials")
 	t.Logf("  - Error properly logged and captured")
@@ -509,36 +481,34 @@ func TestIntegration_ExistingSSHKey(t *testing.T) {
 	mas := &MockAPIServer{}
 	mas.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/login/":
-			expiresAt := time.Now().Add(24 * time.Hour)
-			resp := map[string]interface{}{
-				"result": "OK",
-				"token":  testutil.MakeTestJWT(expiresAt),
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(resp)
-		case "/v1/sshkey", "/v1/sshkey/":
+		case "/v3/login/":
+			http.Error(w, "login endpoint should not be called", http.StatusInternalServerError)
+		case "/v3/users/ssh-keys", "/v3/users/ssh-keys/":
 			switch r.Method {
 			case http.MethodGet:
 				atomic.AddInt32(&getCalls, 1)
-				keys := []map[string]interface{}{
-					{
-						"id":          "existing-key-id",
-						"name":        "nvair-cli",
-						"fingerprint": kp.Fingerprint,
+				resp := map[string]interface{}{
+					"count":    1,
+					"next":     nil,
+					"previous": nil,
+					"results": []map[string]interface{}{
+						{
+							"id":          "existing-key-id",
+							"name":        "nvair-cli",
+							"fingerprint": kp.Fingerprint,
+						},
 					},
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(keys)
+				json.NewEncoder(w).Encode(resp)
 			case http.MethodPost:
 				atomic.AddInt32(&createCalls, 1)
 				http.Error(w, "CreateSSHKey should not be called when fingerprint matches", http.StatusInternalServerError)
 			default:
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
-		case "/v1/sshkey/existing-key-id/":
+		case "/v3/users/ssh-keys/existing-key-id/":
 			if r.Method == http.MethodDelete {
 				atomic.AddInt32(&deleteCalls, 1)
 				http.Error(w, "DeleteSSHKey should not be called when fingerprint matches", http.StatusInternalServerError)
@@ -661,7 +631,7 @@ func TestIntegration_RealAPI(t *testing.T) {
 		"login",
 		"-u", username,
 		"-p", token,
-		"--api-endpoint", "https://air.nvidia.com/api")
+		"--api-endpoint", "https://api.dsx-air.nvidia.com/api")
 
 	logCommandOutput(t, result, "TestIntegration_RealAPI")
 
@@ -693,7 +663,7 @@ func TestIntegration_RealAPI(t *testing.T) {
 	}
 
 	// Verify required fields are present
-	requiredFields := []string{"username", "apiToken", "bearerToken", "bearerTokenExpiresAt", "apiEndpoint"}
+	requiredFields := []string{"username", "apiToken", "apiEndpoint"}
 	for _, field := range requiredFields {
 		if _, exists := config[field]; !exists {
 			t.Errorf("Required field '%s' missing from config", field)
@@ -762,8 +732,10 @@ func TestIntegration_ConfigurationManagement(t *testing.T) {
 		t.Errorf("Username mismatch: expected 'test@example.com', got %v", config["username"])
 	}
 
-	if _, exists := config["bearerToken"]; !exists {
-		t.Errorf("Bearer token missing from configuration")
+	for _, field := range []string{"bearerToken", "bearerTokenExpiresAt"} {
+		if _, exists := config[field]; exists {
+			t.Errorf("Legacy field %q should not be present in configuration", field)
+		}
 	}
 
 	t.Logf("✓ Configuration management test passed")

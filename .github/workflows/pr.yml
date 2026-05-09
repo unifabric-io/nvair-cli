@@ -13,7 +13,7 @@ jobs:
     uses: ./.github/workflows/e2e-tests.yml
     secrets:
       NV_AIR_USER: ${{ secrets.NV_AIR_USER }}
-      NV_AIR_TOKEN: ${{ secrets.NV_AIR_TOKEN }}
+      NV_DSX_AIR_TOKEN: ${{ secrets.NV_DSX_AIR_TOKEN }}
   
   security:
     uses: ./.github/workflows/security.yml

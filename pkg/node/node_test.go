@@ -73,6 +73,81 @@ func TestParseNodeMetadata(t *testing.T) {
 	}
 }
 
+func TestResolveMgmtIP(t *testing.T) {
+	tests := []struct {
+		name string
+		node api.Node
+		want string
+	}{
+		{
+			name: "prefer top level management_ip",
+			node: api.Node{
+				ManagementIP: "192.168.200.10",
+				Metadata:     `{"mgmt_ip":"10.0.0.1"}`,
+			},
+			want: "192.168.200.10",
+		},
+		{
+			name: "fallback to metadata",
+			node: api.Node{
+				Metadata: `{"mgmt_ip":"10.0.0.1"}`,
+			},
+			want: "10.0.0.1",
+		},
+		{
+			name: "missing management ip",
+			node: api.Node{
+				Metadata: `{"foo":"bar"}`,
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolveMgmtIP(tt.node)
+			if err != nil {
+				t.Fatalf("ResolveMgmtIP() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("ResolveMgmtIP() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveImageID(t *testing.T) {
+	tests := []struct {
+		name string
+		node api.Node
+		want string
+	}{
+		{
+			name: "prefer image",
+			node: api.Node{
+				Image: "img-new",
+				OS:    "img-old",
+			},
+			want: "img-new",
+		},
+		{
+			name: "fallback to os",
+			node: api.Node{
+				OS: "img-old",
+			},
+			want: "img-old",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveImageID(tt.node); got != tt.want {
+				t.Fatalf("ResolveImageID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSortNodesByName(t *testing.T) {
 	tests := []struct {
 		name     string

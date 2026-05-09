@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/unifabric-io/nvair-cli/pkg/api"
 	"github.com/unifabric-io/nvair-cli/pkg/config"
 	"github.com/unifabric-io/nvair-cli/pkg/constant"
+	forwardutil "github.com/unifabric-io/nvair-cli/pkg/forward"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
 	"github.com/unifabric-io/nvair-cli/pkg/simulation"
 	sshpkg "github.com/unifabric-io/nvair-cli/pkg/ssh"
@@ -77,32 +77,12 @@ func (pc *Command) configureVerbose() {
 
 func ensureAuthenticatedClient(apiEndpoint string) (*api.Client, *config.Config, error) {
 	cfg, err := config.Load()
-	if err != nil || cfg.BearerToken == "" {
+	if err != nil || cfg.APIToken == "" {
 		return nil, nil, fmt.Errorf("not authenticated. Please run 'nvair login' first")
 	}
 
 	endpoint := config.ResolveAPIEndpoint(cfg, apiEndpoint)
-
-	if cfg.IsTokenExpired(time.Now()) {
-		if cfg.APIToken == "" {
-			return nil, nil, fmt.Errorf("authentication token has expired and no API token available. Please run 'nvair login' again")
-		}
-
-		refreshClient := api.NewClient(endpoint, "")
-		newBearerToken, expiresAt, err := refreshClient.AuthLogin(cfg.Username, cfg.APIToken)
-		if err != nil {
-			return nil, nil, fmt.Errorf("authentication token expired and refresh failed: %w", err)
-		}
-
-		cfg.BearerToken = newBearerToken
-		cfg.BearerTokenExpiresAt = expiresAt
-		if err := cfg.Save(); err != nil {
-			logging.Verbose("Warning: Failed to save refreshed token: %v", err)
-			return nil, nil, fmt.Errorf("authentication token refreshed but failed to persist new token: %w", err)
-		}
-	}
-
-	return api.NewClient(endpoint, cfg.BearerToken), cfg, nil
+	return api.NewClient(endpoint, cfg.APIToken), cfg, nil
 }
 
 func (pc *Command) findSSHService(apiClient *api.Client, simulationID string) (string, int, error) {
@@ -112,7 +92,8 @@ func (pc *Command) findSSHService(apiClient *api.Client, simulationID string) (s
 	}
 
 	for _, service := range services {
-		if strings.EqualFold(service.ServiceType, "ssh") &&
+		if (service.NodeName == constant.OOBMgmtServerName || forwardutil.IsBastionSSHServiceName(service.Name)) &&
+			strings.EqualFold(service.ServiceType, "ssh") &&
 			service.Host != "" &&
 			service.SrcPort > 0 {
 			return service.Host, service.SrcPort, nil

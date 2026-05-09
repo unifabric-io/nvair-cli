@@ -12,19 +12,19 @@ This document resolves all unknowns and clarifications needed before Phase 1 des
 **Question**: What is the exact API endpoint URL and authentication mechanism for nvair.unifabric.io?
 
 **Decision**: 
-- **Primary Endpoint**: `https://nvair.unifabric.io/api`
-- **API Versions**: Primarily uses `/api/v2`, but also supports `/api/v1` endpoints
-- **Swagger Documentation**: https://air.nvidia.com/api/
-- **Authentication Method**: OAuth2 Bearer Token
-- **Token Exchange**: Username + API Token → Bearer Token (via POST /auth/login)
-- **Token Storage**: In plaintext JSON config (user responsible for file permissions)
-- **Token Expiry**: Tokens expire after 24 hours; CLI should handle expiry gracefully
+- **Primary Endpoint**: `https://api.dsx-air.nvidia.com/api`
+- **API Versions**: Uses `/api/v3` endpoints for current CLI operations
+- **Swagger Documentation**: https://api.dsx-air.nvidia.com/api/
+- **Authentication Method**: API key sent directly in `Authorization: Bearer <apiToken>`
+- **Token Exchange**: None; the CLI does not exchange API keys for separate bearer tokens
+- **Token Storage**: Username, API key, and API endpoint in plaintext JSON config with `0600` file permissions
+- **Token Expiry**: No local bearer-token expiry is tracked
 
-**Rationale**: Industry-standard OAuth2 pattern balances security with usability for CLI tools. Local JSON storage aligns with common CLI practices (e.g., kubectl, gcloud).
+**Rationale**: The platform API key is sufficient for authenticated CLI operations, so removing the derived bearer token avoids redundant credential storage and refresh logic.
 
 **Alternatives Considered**: 
-- SSH key-based auth: Would add complexity; username/token is simpler
-- Direct credential storage: Would be less secure; bearer tokens allow rotation
+- SSH key-based API auth: Would add complexity; API key auth is simpler for platform calls
+- Bearer-token exchange and refresh: Adds local state without providing value when the API key can be used directly
 
 ---
 
@@ -273,12 +273,10 @@ This document resolves all unknowns and clarifications needed before Phase 1 des
 **Question**: How does CLI handle expired tokens and configuration refresh?
 
 **Decision**:
-- **Token Expiry Detection**: Each command checks if bearer token is expired before execution
-- **Automatic Token Refresh**: When bearer token is expired, CLI automatically refreshes it using stored username and API token (no user interaction needed)
-- **Token Exchange**: Username + API Token → New Bearer Token (via POST /auth/login)
-- **Transparent to User**: Token refresh happens automatically in the background when needed
+- **Authentication Check**: Commands verify that local configuration contains an API key before making authenticated requests
+- **Token Exchange**: None; authenticated requests use the stored API key directly
 
-**Rationale**: Provides seamless user experience - users only need to log in once, and the CLI handles token refresh automatically using the stored API token.
+**Rationale**: The API key is the durable credential. Removing bearer-token refresh avoids unnecessary background auth calls and reduces redundant secret storage.
 
 **Alternatives Considered**:
 - Manual re-login on expiry: Would be disruptive to user workflow

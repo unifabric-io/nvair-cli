@@ -38,8 +38,8 @@ Verbose logs are printed to stderr with the following format:
 Example:
 ```
 [DEBUG] [2026-02-10 10:23:45] Login command started with username: user@example.com
-[DEBUG] [2026-02-10 10:23:45] AuthLogin: Starting authentication for user: user@example.com
-[DEBUG] [2026-02-10 10:23:45] doRequest: [Attempt 1/3] POST https://air.nvidia.com/api/v1/login/
+[DEBUG] [2026-02-10 10:23:45] Step 1/6: Using provided API key directly with API endpoint: https://api.dsx-air.nvidia.com/api
+[DEBUG] [2026-02-10 10:23:45] doRequest: [Attempt 1/3] GET https://api.dsx-air.nvidia.com/api/v3/users/ssh-keys/?limit=
 ```
 
 ## What Gets Logged
@@ -61,7 +61,7 @@ Example:
 - Request body (with truncated secrets)
 - Response status codes and timing
 - Retry attempts with backoff timing
-- Bearer token injection (with truncated token for security)
+- API token Authorization header injection (with truncated token for security)
 
 ### Commands
 - Command initialization and flag validation
@@ -105,7 +105,6 @@ Verbose output shows:
 Verbose logs may contain:
 - Usernames and email addresses
 - Truncated API tokens (displayed as `my-token-...`)
-- Truncated bearer tokens (displayed as `my-bearer-...`)
 - SSH key fingerprints
 
 **Note**: Full tokens are never logged. For security, avoid sharing verbose logs that contain sensitive information.
