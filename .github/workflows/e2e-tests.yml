@@ -15,7 +15,7 @@ on:
         default: 'main'
         type: string
   schedule:
-    - cron: '0 0 * * *'  # every day at midnight
+    - cron: '0 18 1 * *'  # monthly at 02:00 UTC+8
 
 jobs:
   e2e-tests:
