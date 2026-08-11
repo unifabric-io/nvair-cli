@@ -1,6 +1,6 @@
 {
   "format": "JSON",
-  "title": "no-nodes-topology",
+  "name": "no-nodes-topology",
   "ztp": null,
   "content": {
     "nodes": {},

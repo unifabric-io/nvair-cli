@@ -20,12 +20,12 @@ func ValidateTopology(topology *RawTopology) *ValidationResult {
 		return result
 	}
 
-	// Check title field (required)
-	if topology.Title == "" {
+	// Check name field (required)
+	if topology.Name == "" {
 		result.Valid = false
 		result.Errors = append(result.Errors, ValidationError{
-			Field:   "title",
-			Message: "title field is required and cannot be empty",
+			Field:   "name",
+			Message: "name field is required and cannot be empty",
 		})
 	}
 

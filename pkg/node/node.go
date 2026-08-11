@@ -23,22 +23,40 @@ func ParseNodeMetadata(metadata string) (*NodeMetadata, error) {
 	return &nm, nil
 }
 
-// ResolveMgmtIP returns the node management IP from the new top-level field first,
-// and falls back to legacy metadata.mgmt_ip for older API responses.
+// ResolveMgmtIP returns the node management IP. It checks, in order:
+//  1. the top-level "management_ip" field (older API responses),
+//  2. the "management_interfaces" map (current /v3/simulations/nodes/
+//     responses, which expose per-interface entries like
+//     {"eth0": {"ip": "...", "mac_address": "..."}} instead of a single
+//     top-level management IP).
 func ResolveMgmtIP(n api.Node) (string, error) {
 	if mgmtIP := strings.TrimSpace(n.ManagementIP); mgmtIP != "" {
 		return mgmtIP, nil
 	}
-	if strings.TrimSpace(n.Metadata) == "" {
-		return "", nil
+
+	return resolveMgmtIPFromInterfaces(n.ManagementInterfaces), nil
+}
+
+// resolveMgmtIPFromInterfaces returns the first non-empty IP found in the
+// management interfaces map, iterating interface names in sorted order for
+// deterministic results (nodes commonly expose a single "eth0"/"eth1" entry).
+func resolveMgmtIPFromInterfaces(interfaces map[string]api.ManagementInterface) string {
+	if len(interfaces) == 0 {
+		return ""
 	}
 
-	metadata, err := ParseNodeMetadata(n.Metadata)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve management IP from node metadata: %w", err)
+	names := make([]string, 0, len(interfaces))
+	for name := range interfaces {
+		names = append(names, name)
 	}
+	sort.Strings(names)
 
-	return strings.TrimSpace(metadata.MgmtIP), nil
+	for _, name := range names {
+		if ip := strings.TrimSpace(interfaces[name].IP); ip != "" {
+			return ip
+		}
+	}
+	return ""
 }
 
 // ResolveImageID returns the node image identifier from the new top-level image

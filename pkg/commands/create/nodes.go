@@ -18,7 +18,7 @@ func findOOBMgmtServer(nodes []api.Node) (string, error) {
 	}
 
 	logging.Verbose("oob-mgmt-server node not found")
-	return "", fmt.Errorf("oob-mgmt-server node not found in simulation")
+	return "", errOOBMgmtServerNotFound
 }
 
 func findOutboundInterface(interfaces []api.Interface) (string, error) {

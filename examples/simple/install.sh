@@ -128,9 +128,13 @@ if [[ ! -f "${TOPOLOGY_DIR}/topology.json" ]]; then
   exit 1
 fi
 
-SIMULATION="$(awk -F'"' '/"title"[[:space:]]*:[[:space:]]*"/ { print $4; exit }' "${TOPOLOGY_DIR}/topology.json")"
+SIMULATION="$(awk -F'"' '/"name"[[:space:]]*:[[:space:]]*"/ { print $4; exit }' "${TOPOLOGY_DIR}/topology.json")"
 if [[ -z "${SIMULATION}" ]]; then
-  echo "failed to parse simulation title from ${TOPOLOGY_DIR}/topology.json" >&2
+  # Fall back to the legacy "title" field for older topology.json files.
+  SIMULATION="$(awk -F'"' '/"title"[[:space:]]*:[[:space:]]*"/ { print $4; exit }' "${TOPOLOGY_DIR}/topology.json")"
+fi
+if [[ -z "${SIMULATION}" ]]; then
+  echo "failed to parse simulation name from ${TOPOLOGY_DIR}/topology.json" >&2
   exit 1
 fi
 SIM_ARGS=(-s "${SIMULATION}")

@@ -9,7 +9,7 @@ import (
 )
 
 func deleteDuplicateSimulations(apiClient *api.Client, topo *topology.RawTopology, deleteIfExists bool) error {
-	logging.Verbose("Checking for existing simulations named: %s", topo.Title)
+	logging.Verbose("Checking for existing simulations named: %s", topo.Name)
 	existingSims, err := apiClient.GetSimulations()
 	if err != nil {
 		logging.Verbose("Failed to list simulations: %v", err)
@@ -18,7 +18,7 @@ func deleteDuplicateSimulations(apiClient *api.Client, topo *topology.RawTopolog
 
 	var duplicates []api.SimulationInfo
 	for _, sim := range existingSims {
-		if sim.Name == topo.Title {
+		if sim.Name == topo.Name {
 			duplicates = append(duplicates, sim)
 		}
 	}
@@ -28,7 +28,7 @@ func deleteDuplicateSimulations(apiClient *api.Client, topo *topology.RawTopolog
 	}
 
 	if !deleteIfExists {
-		return fmt.Errorf("simulation with name '%s' already exists. Rerun with --delete-if-exists to replace it or choose a different name", topo.Title)
+		return fmt.Errorf("simulation with name '%s' already exists. Rerun with --delete-if-exists to replace it or choose a different name", topo.Name)
 	}
 
 	for _, sim := range duplicates {

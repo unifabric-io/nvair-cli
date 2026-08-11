@@ -1,6 +1,6 @@
 {
   "format": "JSON",
-  "title": "valid-test-topology",
+  "name": "valid-test-topology",
   "ztp": null,
   "content": {
     "nodes": {
@@ -36,6 +36,8 @@
           "mac": "48:B0:2D:00:00:02"
         }
       ]
-    ]
+    ],
+    "oob": false,
+    "netq": false
   }
 }

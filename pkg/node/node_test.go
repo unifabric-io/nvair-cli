@@ -83,23 +83,54 @@ func TestResolveMgmtIP(t *testing.T) {
 			name: "prefer top level management_ip",
 			node: api.Node{
 				ManagementIP: "192.168.200.10",
-				Metadata:     `{"mgmt_ip":"10.0.0.1"}`,
+				ManagementInterfaces: map[string]api.ManagementInterface{
+					"eth0": {IP: "192.168.200.114"},
+				},
 			},
 			want: "192.168.200.10",
 		},
 		{
-			name: "fallback to metadata",
-			node: api.Node{
-				Metadata: `{"mgmt_ip":"10.0.0.1"}`,
-			},
-			want: "10.0.0.1",
+			name: "missing management ip and no management_interfaces",
+			node: api.Node{},
+			want: "",
 		},
 		{
-			name: "missing management ip",
+			name: "fallback to management_interfaces when management_ip is absent",
 			node: api.Node{
-				Metadata: `{"foo":"bar"}`,
+				ManagementInterfaces: map[string]api.ManagementInterface{
+					"eth0": {IP: "192.168.200.114", MACAddress: "48:B0:2D:00:00:14"},
+				},
+			},
+			want: "192.168.200.114",
+		},
+		{
+			name: "management_interfaces picks lowest interface name deterministically",
+			node: api.Node{
+				ManagementInterfaces: map[string]api.ManagementInterface{
+					"eth1": {IP: "192.168.200.1"},
+					"eth0": {IP: "192.168.200.2"},
+				},
+			},
+			want: "192.168.200.2",
+		},
+		{
+			name: "management_interfaces with null/empty ip is treated as missing",
+			node: api.Node{
+				ManagementInterfaces: map[string]api.ManagementInterface{
+					"eth0": {IP: "", MACAddress: "48:B0:2D:00:04:88"},
+				},
 			},
 			want: "",
+		},
+		{
+			name: "management_ip takes precedence over management_interfaces",
+			node: api.Node{
+				ManagementIP: "192.168.200.10",
+				ManagementInterfaces: map[string]api.ManagementInterface{
+					"eth0": {IP: "192.168.200.114"},
+				},
+			},
+			want: "192.168.200.10",
 		},
 	}
 

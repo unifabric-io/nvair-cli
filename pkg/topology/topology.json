@@ -1,6 +1,6 @@
 {
   "format": "JSON",
-  "title": "valid-test-topology",
+  "name": "valid-test-topology",
   "ztp": null,
   "content": {
     "nodes": {

@@ -14,7 +14,6 @@ import (
 
 	"github.com/unifabric-io/nvair-cli/pkg/constant"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
-	"github.com/unifabric-io/nvair-cli/pkg/topology"
 )
 
 const (
@@ -442,21 +441,21 @@ type CreateSimulationRequest struct {
 // CreateSimulationResponse represents the response body for POST /v3/simulations/import/
 type CreateSimulationResponse struct {
 	ID               string      `json:"id"`
-	Title            string      `json:"title"`
+	Name             string      `json:"name"`
 	Organization     interface{} `json:"organization"`
 	OrganizationName interface{} `json:"organization_name"`
 }
 
-// CreateSimulation creates a new simulation from a topology
-func (c *Client) CreateSimulation(topo *topology.RawTopology) (*CreateSimulationResponse, error) {
-	logging.Verbose("CreateSimulation: Starting simulation creation with topology: %s", topo.Title)
+// CreateSimulationRaw creates a new simulation from the original topology.json bytes.
+func (c *Client) CreateSimulationRaw(topologyJSON []byte, topologyName string) (*CreateSimulationResponse, error) {
+	logging.Verbose("CreateSimulationRaw: Starting simulation creation with topology: %s", topologyName)
 
-	reqBody := topo
+	reqBody := json.RawMessage(topologyJSON)
 
-	logging.Verbose("CreateSimulation: Sending POST request to %s", simulationsImportEndpoint)
+	logging.Verbose("CreateSimulationRaw: Sending POST request to %s", simulationsImportEndpoint)
 	resp, err := c.doRequest("POST", simulationsImportEndpoint, &reqBody, true)
 	if err != nil {
-		logging.Verbose("CreateSimulation: Request failed with error: %v", err)
+		logging.Verbose("CreateSimulationRaw: Request failed with error: %v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -466,18 +465,18 @@ func (c *Client) CreateSimulation(topo *topology.RawTopology) (*CreateSimulation
 
 	// Check for errors
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		logging.Verbose("CreateSimulation: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
+		logging.Verbose("CreateSimulationRaw: Received status code %d with body: %s", resp.StatusCode, string(bodyBytes))
 		return nil, fmt.Errorf("create simulation failed: status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	// Decode response
 	var simResp CreateSimulationResponse
 	if err := json.Unmarshal(bodyBytes, &simResp); err != nil {
-		logging.Verbose("CreateSimulation: Failed to decode response: %v", err)
+		logging.Verbose("CreateSimulationRaw: Failed to decode response: %v", err)
 		return nil, fmt.Errorf("failed to decode create simulation response: %w", err)
 	}
 
-	logging.Verbose("CreateSimulation: Successfully created simulation with ID: %s, Title: %s", simResp.ID, simResp.Title)
+	logging.Verbose("CreateSimulationRaw: Successfully created simulation with ID: %s, Name: %s", simResp.ID, simResp.Name)
 	return &simResp, nil
 }
 
@@ -801,17 +800,26 @@ func (c *Client) GetJob(jobID string) (*Job, error) {
 	return &job, nil
 }
 
+// ManagementInterface represents a single management interface entry as
+// returned under a node's "management_interfaces" map (keyed by interface
+// name, e.g. "eth0").
+type ManagementInterface struct {
+	IP         string `json:"ip"`
+	MACAddress string `json:"mac_address"`
+}
+
 // Node represents a simulation node
 type Node struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	State        string `json:"state"`
-	Metadata     string `json:"metadata"`
-	ManagementIP string `json:"management_ip"`
-	Image        string `json:"image"`
-	OS           string `json:"os"`
-	OSName       string `json:"-"`
-	Simulation   string `json:"simulation"`
+	ID                   string                         `json:"id"`
+	Name                 string                         `json:"name"`
+	State                string                         `json:"state"`
+	Metadata             string                         `json:"metadata"`
+	ManagementIP         string                         `json:"management_ip"`
+	ManagementInterfaces map[string]ManagementInterface `json:"management_interfaces"`
+	Image                string                         `json:"image"`
+	OS                   string                         `json:"os"`
+	OSName               string                         `json:"-"`
+	Simulation           string                         `json:"simulation"`
 }
 
 // nodeListResponse represents the response body for GET /v3/simulations/nodes/
@@ -820,14 +828,15 @@ type nodeListResponse struct {
 }
 
 type rawNode struct {
-	ID           string      `json:"id"`
-	Name         string      `json:"name"`
-	State        string      `json:"state"`
-	Metadata     interface{} `json:"metadata"`
-	ManagementIP string      `json:"management_ip"`
-	Image        string      `json:"image"`
-	OS           string      `json:"os"`
-	Simulation   string      `json:"simulation"`
+	ID                   string                         `json:"id"`
+	Name                 string                         `json:"name"`
+	State                string                         `json:"state"`
+	Metadata             interface{}                    `json:"metadata"`
+	ManagementIP         string                         `json:"management_ip"`
+	ManagementInterfaces map[string]ManagementInterface `json:"management_interfaces"`
+	Image                string                         `json:"image"`
+	OS                   string                         `json:"os"`
+	Simulation           string                         `json:"simulation"`
 }
 
 type rawNodeListResponse struct {
@@ -934,14 +943,15 @@ func normalizeNode(n rawNode) Node {
 	}
 
 	return Node{
-		ID:           n.ID,
-		Name:         n.Name,
-		State:        n.State,
-		Metadata:     metadata,
-		ManagementIP: n.ManagementIP,
-		Image:        imageID,
-		OS:           imageID,
-		Simulation:   n.Simulation,
+		ID:                   n.ID,
+		Name:                 n.Name,
+		State:                n.State,
+		Metadata:             metadata,
+		ManagementIP:         n.ManagementIP,
+		ManagementInterfaces: n.ManagementInterfaces,
+		Image:                imageID,
+		OS:                   imageID,
+		Simulation:           n.Simulation,
 	}
 }
 

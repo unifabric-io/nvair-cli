@@ -112,10 +112,12 @@ func TestRegister_SimulationFlagOptional(t *testing.T) {
 func TestExecute_UploadUsesResolvedCredentials(t *testing.T) {
 	server := newCopyTestServer(t, []map[string]interface{}{
 		{
-			"id":         "node-1",
-			"name":       "node-gpu-1",
-			"state":      "RUNNING",
-			"metadata":   `{"mgmt_ip":"192.168.200.6"}`,
+			"id":    "node-1",
+			"name":  "node-gpu-1",
+			"state": "RUNNING",
+			"management_interfaces": map[string]interface{}{
+				"eth0": map[string]interface{}{"ip": "192.168.200.6"},
+			},
 			"os":         "img-ubuntu",
 			"simulation": "sim-1",
 		},
@@ -183,10 +185,12 @@ func TestExecute_UploadUsesResolvedCredentials(t *testing.T) {
 func TestExecute_DownloadFromBastionNodeUsesDirectTarget(t *testing.T) {
 	server := newCopyTestServer(t, []map[string]interface{}{
 		{
-			"id":         "node-1",
-			"name":       constant.OOBMgmtServerName,
-			"state":      "RUNNING",
-			"metadata":   `{"mgmt_ip":"192.168.200.2"}`,
+			"id":    "node-1",
+			"name":  constant.OOBMgmtServerName,
+			"state": "RUNNING",
+			"management_interfaces": map[string]interface{}{
+				"eth0": map[string]interface{}{"ip": "192.168.200.2"},
+			},
 			"os":         "img-ubuntu",
 			"simulation": "sim-1",
 		},

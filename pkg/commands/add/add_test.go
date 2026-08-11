@@ -89,7 +89,7 @@ func TestExecuteForward_SuccessAllocatesFirstAutoPort(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":2,"results":[
 				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
-				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
+				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","management_interfaces":{"eth0":{"ip":"192.168.200.6"}},"os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
 		case r.URL.Path == "/v3/simulations/nodes/interfaces" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
@@ -159,7 +159,7 @@ func TestExecuteForward_SkipsUsedPortsFromIPTablesComments(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":2,"results":[
 				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
-				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
+				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","management_interfaces":{"eth0":{"ip":"192.168.200.6"}},"os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
 		case r.URL.Path == "/v3/simulations/nodes/interfaces" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
@@ -220,7 +220,7 @@ func TestExecuteForward_DoesNotReuseParsedForwardNameForSameDestination(t *testi
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":2,"results":[
 				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
-				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
+				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","management_interfaces":{"eth0":{"ip":"192.168.200.6"}},"os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
 		case r.URL.Path == "/v3/simulations/nodes/interfaces" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
@@ -290,7 +290,7 @@ func TestExecuteForward_RejectsExistingForwardNameForSameTarget(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":2,"results":[
 				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
-				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"}
+				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","management_interfaces":{"eth0":{"ip":"192.168.200.6"}},"os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
 		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "POST":
 			createCalls++
@@ -354,8 +354,8 @@ func TestExecuteForward_RejectsExistingForwardNameWithDifferentTarget(t *testing
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":3,"results":[
 				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{}","os":"img-ubuntu","simulation":"sim-1"},
-				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.6\"}","os":"img-ubuntu","simulation":"sim-1"},
-				{"id":"node-3","name":"node-gpu-2","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.7\"}","os":"img-ubuntu","simulation":"sim-1"}
+				{"id":"node-2","name":"node-gpu-1","state":"RUNNING","management_interfaces":{"eth0":{"ip":"192.168.200.6"}},"os":"img-ubuntu","simulation":"sim-1"},
+				{"id":"node-3","name":"node-gpu-2","state":"RUNNING","management_interfaces":{"eth0":{"ip":"192.168.200.7"}},"os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
 		case r.URL.Path == "/v3/simulations/nodes/interfaces/services/" && r.Method == "POST":
 			createCalls++
@@ -414,7 +414,7 @@ func TestExecuteForward_TargetBastionSSHUsesManagedForwardPath(t *testing.T) {
 		case r.URL.Path == "/v3/simulations/nodes/" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":1,"results":[
-				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","metadata":"{\"mgmt_ip\":\"192.168.200.2\"}","os":"img-ubuntu","simulation":"sim-1"}
+				{"id":"node-1","name":"oob-mgmt-server","state":"RUNNING","management_interfaces":{"eth0":{"ip":"192.168.200.2"}},"os":"img-ubuntu","simulation":"sim-1"}
 			]}`))
 		case r.URL.Path == "/v3/simulations/nodes/interfaces" && r.Method == "GET":
 			w.Header().Set("Content-Type", "application/json")

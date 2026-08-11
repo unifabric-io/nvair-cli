@@ -70,8 +70,8 @@ func TestTopologyLoading_Integration(t *testing.T) {
 		t.Fatalf("Valid topology failed validation: %v", result.Errors)
 	}
 
-	if topo.Title == "" {
-		t.Errorf("Expected non-empty topology title")
+	if topo.Name == "" {
+		t.Errorf("Expected non-empty topology name")
 	}
 
 	if len(topo.Content.Nodes) == 0 {
@@ -83,7 +83,7 @@ func TestCreateCommand_GenericNodeNetplanValidated(t *testing.T) {
 	dir := t.TempDir()
 	writeTestTopology(t, dir, `{
 		"format": "JSON",
-		"title": "generic-netplan-valid",
+		"name": "generic-netplan-valid",
 		"content": {
 			"nodes": {
 				"node-generic-1": {
@@ -115,7 +115,7 @@ func TestCreateCommand_GenericNodeInvalidNetplanFails(t *testing.T) {
 	dir := t.TempDir()
 	writeTestTopology(t, dir, `{
 		"format": "JSON",
-		"title": "generic-netplan-invalid",
+		"name": "generic-netplan-invalid",
 		"content": {
 			"nodes": {
 				"node-generic-1": {
@@ -143,11 +143,11 @@ func TestCreateCommand_GenericNodeInvalidNetplanFails(t *testing.T) {
 	}
 }
 
-func TestCreateCommand_GenericNodeMissingNetplanFails(t *testing.T) {
+func TestCreateCommand_GenericNodeMissingNetplanSkipped(t *testing.T) {
 	dir := t.TempDir()
 	writeTestTopology(t, dir, `{
 		"format": "JSON",
-		"title": "generic-netplan-missing",
+		"name": "generic-netplan-missing",
 		"content": {
 			"nodes": {
 				"node-generic-1": {
@@ -163,12 +163,8 @@ func TestCreateCommand_GenericNodeMissingNetplanFails(t *testing.T) {
 	createCmd.Directory = dir
 	createCmd.DryRun = true
 
-	err := createCmd.Execute()
-	if err == nil {
-		t.Fatalf("Expected missing generic netplan to fail")
-	}
-	if !strings.Contains(err.Error(), "invalid netplan config for generic node node-generic-1") {
-		t.Fatalf("Unexpected error: %v", err)
+	if err := createCmd.Execute(); err != nil {
+		t.Fatalf("Expected missing generic netplan to be skipped, got: %v", err)
 	}
 }
 
@@ -203,6 +199,21 @@ func TestResolveNodeImageNames(t *testing.T) {
 	genericNodes := filterGenericUbuntuNodes(resolved)
 	if len(genericNodes) != 1 || genericNodes[0].Name != "node-1" {
 		t.Fatalf("Expected one generic node, got %+v", genericNodes)
+	}
+}
+
+func TestFindOOBMgmtServer_ReturnsSentinelWhenMissing(t *testing.T) {
+	nodes := []api.Node{
+		{ID: "1", Name: "node-1"},
+		{ID: "2", Name: "switch-1"},
+	}
+
+	_, err := findOOBMgmtServer(nodes)
+	if err == nil {
+		t.Fatal("expected error when oob-mgmt-server is missing")
+	}
+	if !errors.Is(err, errOOBMgmtServerNotFound) {
+		t.Fatalf("expected errOOBMgmtServerNotFound, got %v", err)
 	}
 }
 

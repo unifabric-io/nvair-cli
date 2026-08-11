@@ -6,7 +6,7 @@ import (
 
 func TestValidateTopology_ValidTopology(t *testing.T) {
 	topo := &RawTopology{
-		Title: "test-topology",
+		Name: "test-topology",
 		Content: RawTopologyContent{
 			Nodes: map[string]interface{}{
 				"node-1": map[string]interface{}{
@@ -30,9 +30,9 @@ func TestValidateTopology_ValidTopology(t *testing.T) {
 	}
 }
 
-func TestValidateTopology_MissingTitle(t *testing.T) {
+func TestValidateTopology_MissingName(t *testing.T) {
 	topo := &RawTopology{
-		Title: "",
+		Name: "",
 		Content: RawTopologyContent{
 			Nodes: map[string]interface{}{
 				"node-1": map[string]interface{}{
@@ -44,24 +44,24 @@ func TestValidateTopology_MissingTitle(t *testing.T) {
 
 	result := ValidateTopology(topo)
 	if result.Valid {
-		t.Errorf("Expected invalid topology for missing title")
+		t.Errorf("Expected invalid topology for missing name")
 	}
 
-	hasTitleError := false
+	hasNameError := false
 	for _, err := range result.Errors {
-		if err.Field == "title" {
-			hasTitleError = true
+		if err.Field == "name" {
+			hasNameError = true
 			break
 		}
 	}
-	if !hasTitleError {
-		t.Errorf("Expected error for 'title' field")
+	if !hasNameError {
+		t.Errorf("Expected error for 'name' field")
 	}
 }
 
 func TestValidateTopology_EmptyNodes(t *testing.T) {
 	topo := &RawTopology{
-		Title: "test-topology",
+		Name: "test-topology",
 		Content: RawTopologyContent{
 			Nodes: map[string]interface{}{},
 		},
@@ -86,7 +86,7 @@ func TestValidateTopology_EmptyNodes(t *testing.T) {
 
 func TestValidateTopology_MultipleErrors(t *testing.T) {
 	topo := &RawTopology{
-		Title: "",
+		Name: "",
 		Content: RawTopologyContent{
 			Nodes: map[string]interface{}{},
 		},
@@ -115,7 +115,7 @@ func TestValidateTopology_NilTopology(t *testing.T) {
 
 func TestFormatValidationErrors(t *testing.T) {
 	errors := []ValidationError{
-		{Field: "title", Message: "title is required"},
+		{Field: "name", Message: "name is required"},
 		{Field: "content.nodes", Message: "nodes must not be empty"},
 	}
 
@@ -124,8 +124,8 @@ func TestFormatValidationErrors(t *testing.T) {
 		t.Errorf("Expected formatted error string, got empty")
 	}
 
-	if !contains(formatted, "title") {
-		t.Errorf("Expected 'title' in formatted output")
+	if !contains(formatted, "name") {
+		t.Errorf("Expected 'name' in formatted output")
 	}
 
 	if !contains(formatted, "content.nodes") {

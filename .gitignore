@@ -43,3 +43,6 @@ coverage.out
 !.specify/
 !.specify/memory/
 !.specify/memory/**
+
+# Local build/test cache
+.cache/

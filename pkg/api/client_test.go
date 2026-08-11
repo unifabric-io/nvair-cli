@@ -771,6 +771,44 @@ func TestGetNodes_Success(t *testing.T) {
 	}
 }
 
+// TestGetNodes_ParsesManagementInterfaces verifies that GetNodes decodes the
+// "management_interfaces" map returned by the current API, where nodes have
+// no top-level "management_ip" and a null "metadata", exposing their
+// management IP only under management_interfaces.<ifname>.ip.
+func TestGetNodes_ParsesManagementInterfaces(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v3/simulations/nodes/" && r.Method == "GET" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"count":1,"results":[
+				{"id":"node-1","name":"switch-gpu-leaf1","state":"ACTIVE","metadata":null,"image":"img","management_interfaces":{"eth0":{"ip":"192.168.200.111","mac_address":"48:B0:2D:00:00:00"}}}
+			]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-token")
+	nodes, err := client.GetNodes("test-simulation-id")
+	if err != nil {
+		t.Fatalf("GetNodes failed: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("Expected 1 node, got %d", len(nodes))
+	}
+	if nodes[0].ManagementIP != "" {
+		t.Errorf("Expected empty top-level ManagementIP, got %q", nodes[0].ManagementIP)
+	}
+	iface, ok := nodes[0].ManagementInterfaces["eth0"]
+	if !ok {
+		t.Fatalf("Expected management_interfaces to contain eth0, got %+v", nodes[0].ManagementInterfaces)
+	}
+	if iface.IP != "192.168.200.111" {
+		t.Errorf("Expected eth0 IP 192.168.200.111, got %q", iface.IP)
+	}
+}
+
 // TestGetNodeInterfaces_Success tests retrieving node interfaces.
 func TestGetNodeInterfaces_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
