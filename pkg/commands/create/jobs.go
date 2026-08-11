@@ -8,14 +8,18 @@ import (
 	"time"
 
 	"github.com/unifabric-io/nvair-cli/pkg/api"
+	"github.com/unifabric-io/nvair-cli/pkg/constant"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
+	nodeutil "github.com/unifabric-io/nvair-cli/pkg/node"
 )
 
 var (
-	waitForJobsPollInterval            = 2 * time.Second
-	waitForJobsMaxWaitTime             = 10 * time.Minute
-	waitForSimulationStatePollInterval = 5 * time.Second
-	waitForSimulationStateMaxWaitTime  = 15 * time.Minute
+	waitForJobsPollInterval              = 2 * time.Second
+	waitForJobsMaxWaitTime               = 10 * time.Minute
+	waitForSimulationStatePollInterval   = 5 * time.Second
+	waitForSimulationStateMaxWaitTime    = 15 * time.Minute
+	waitForNodeManagementIPsPollInterval = 5 * time.Second
+	waitForNodeManagementIPsMaxWaitTime  = 10 * time.Minute
 )
 
 // WaitForJobs waits for all specified jobs to reach a terminal state (COMPLETE, FAILED, or CANCELLED).
@@ -116,6 +120,64 @@ func (cc *Command) WaitForSimulationState(apiClient *api.Client, simulationID, d
 
 		time.Sleep(waitForSimulationStatePollInterval)
 	}
+}
+
+// WaitForNodeManagementIPs polls GetNodes until every node (other than
+// out-of-band management nodes, i.e. oob-mgmt-server, which is reached via
+// its own outbound interface rather than a management IP, and
+// oob-mgmt-switch* nodes, which are not expected to have a management IP
+// assigned) reports a management IP. The API can take a short while after a
+// simulation becomes ACTIVE before management IPs are actually assigned, so
+// callers must not assume the node list returned right after ACTIVE is
+// final. It returns the freshest node list once all required nodes have an
+// IP.
+func (cc *Command) WaitForNodeManagementIPs(apiClient *api.Client, simulationID string, nodes []api.Node) ([]api.Node, error) {
+	logging.Verbose("WaitForNodeManagementIPs: Waiting for management IPs on nodes for simulation %s", simulationID)
+	startTime := time.Now()
+	current := nodes
+
+	for {
+		missing := nodesMissingManagementIP(current)
+		if len(missing) == 0 {
+			return current, nil
+		}
+
+		if time.Since(startTime) > waitForNodeManagementIPsMaxWaitTime {
+			return nil, fmt.Errorf("timeout waiting for management IPs to be assigned (waited %v). Missing on: %s", time.Since(startTime), strings.Join(missing, ", "))
+		}
+
+		logging.Verbose("WaitForNodeManagementIPs: Still missing management IPs on: %s", strings.Join(missing, ", "))
+		time.Sleep(waitForNodeManagementIPsPollInterval)
+
+		refreshed, err := apiClient.GetNodes(simulationID)
+		if err != nil {
+			logging.Verbose("WaitForNodeManagementIPs: Error refetching nodes: %v", err)
+			continue
+		}
+		current = refreshed
+	}
+}
+
+func nodesMissingManagementIP(nodes []api.Node) []string {
+	var missing []string
+	for _, n := range nodes {
+		if isOOBMgmtNode(n.Name) {
+			continue
+		}
+		mgmtIP, err := nodeutil.ResolveMgmtIP(n)
+		if err != nil || mgmtIP == "" {
+			missing = append(missing, n.Name)
+		}
+	}
+	return missing
+}
+
+// isOOBMgmtNode reports whether the node is an out-of-band management node
+// (the mgmt server, reached via its outbound interface, or an mgmt switch,
+// e.g. "oob-mgmt-switch-leaf-1") that is not expected to have a management
+// IP assigned like other switches/nodes.
+func isOOBMgmtNode(name string) bool {
+	return name == constant.OOBMgmtServerName || strings.HasPrefix(name, constant.OOBMgmtSwitchName)
 }
 
 func isRetryableSimulationStateError(err error) bool {

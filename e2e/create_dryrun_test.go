@@ -77,7 +77,7 @@ func TestIntegration_Create_DryRunNegativeScenarios(t *testing.T) {
 			args: []string{"create", "--dry-run"},
 			expectedContains: []string{
 				"✗ Topology validation failed:",
-				"title: title field is required and cannot be empty",
+				"name: name field is required and cannot be empty",
 				"content.nodes: nodes must have at least one node",
 				"topology validation failed",
 			},
@@ -91,7 +91,7 @@ func TestIntegration_Create_DryRunNegativeScenarios(t *testing.T) {
 				dir := t.TempDir()
 				writeE2ETestFile(t, filepath.Join(dir, "topology.json"), `{
 					"format": "JSON",
-					"title": "invalid-netplan",
+					"name": "invalid-netplan",
 					"content": {
 						"nodes": {
 							"node-generic-1": {

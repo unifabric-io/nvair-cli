@@ -2,6 +2,7 @@ package create
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +11,14 @@ import (
 	"github.com/unifabric-io/nvair-cli/pkg/constant"
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
 	"github.com/unifabric-io/nvair-cli/pkg/ssh"
+)
+
+const (
+	sshConnectTimeout = 10 * time.Second
+	// sshReadyTimeout allows time for cloud-init on the bastion (oob-mgmt-server)
+	// to finish provisioning the SSH public key after the simulation becomes ACTIVE.
+	sshReadyTimeout      = 5 * time.Minute
+	sshReadyPollInterval = 2 * time.Second
 )
 
 // Execute runs the create command.
@@ -28,12 +37,12 @@ func (cc *Command) Execute() error {
 
 	logging.Verbose("Directory specified: %s, dry-run: %v", cc.Directory, cc.DryRun)
 
-	topo, err := loadTopology(cc.Directory)
+	loaded, err := loadTopology(cc.Directory)
 	if err != nil {
 		return err
 	}
 
-	if err := validateGenericUbuntuNodeNetplans(cc.Directory, topo); err != nil {
+	if err := validateGenericUbuntuNodeNetplans(cc.Directory, loaded.parsed); err != nil {
 		return err
 	}
 
@@ -49,17 +58,17 @@ func (cc *Command) Execute() error {
 		return err
 	}
 
-	if err := deleteDuplicateSimulations(apiClient, topo, cc.DeleteIfExists); err != nil {
+	if err := deleteDuplicateSimulations(apiClient, loaded.parsed, cc.DeleteIfExists); err != nil {
 		return err
 	}
 
-	simResp, err := apiClient.CreateSimulation(topo)
+	simResp, err := apiClient.CreateSimulationRaw(loaded.payload, loaded.parsed.Name)
 	if err != nil {
 		logging.Verbose("API request failed: %v", err)
 		return fmt.Errorf("failed to create simulation: %w", err)
 	}
 
-	logging.Info("✓ Simulation created successfully. ID: %s, Name: %s", simResp.ID, simResp.Title)
+	logging.Info("✓ Simulation created successfully. ID: %s, Name: %s", simResp.ID, simResp.Name)
 
 	logging.Info("Waiting for imported simulation to become INACTIVE ...")
 	if err := cc.WaitForSimulationState(apiClient, simResp.ID, "INACTIVE"); err != nil {
@@ -100,8 +109,24 @@ func (cc *Command) Execute() error {
 	}
 	nodes = resolveNodeImageNames(nodes, images)
 
+	logging.Info("Waiting for switch and node management IPs to be assigned ...")
+	nodes, err = cc.WaitForNodeManagementIPs(apiClient, simResp.ID, nodes)
+	if err != nil {
+		logging.Verbose("Failed waiting for node management IPs: %v", err)
+		return err
+	}
+
 	oobMgmtServerID, err := findOOBMgmtServer(nodes)
 	if err != nil {
+		if errors.Is(err, errOOBMgmtServerNotFound) {
+			logging.Warn("⚠ oob-mgmt-server node not found; skipping bastion SSH setup and post-create configuration (switch password reset, netplan upload).")
+			logging.Info("  Simulation created, but nodes may still require manual configuration.")
+			logging.Info("  To get more details about the simulation:")
+			logging.Info("    nvair get simulation")
+			logging.Info("    nvair get nodes -s %s", simResp.Name)
+			logging.Info("    nvair get forwards -s %s", simResp.Name)
+			return nil
+		}
 		return err
 	}
 
@@ -137,9 +162,9 @@ func (cc *Command) Execute() error {
 		Addr:           bastionAddr,
 		User:           constant.DefaultUbuntuUser,
 		PrivateKey:     keyPath,
-		ConnectTimeout: 10 * time.Second,
-		ReadyTimeout:   120 * time.Second,
-		PollInterval:   2 * time.Second,
+		ConnectTimeout: sshConnectTimeout,
+		ReadyTimeout:   sshReadyTimeout,
+		PollInterval:   sshReadyPollInterval,
 	}); err != nil {
 		logging.Verbose("SSH access did not become ready: %v", err)
 		return fmt.Errorf("ssh service became reachable but did not accept public key authentication in time: %w", err)
@@ -187,8 +212,8 @@ func (cc *Command) Execute() error {
 	logging.Info("  Bastion SSH command: %s", formatBastionSSHCommand(sshResponse.Host, sshResponse.SrcPort, keyPath))
 	logging.Info("  To get more details about the simulation:")
 	logging.Info("    nvair get simulation")
-	logging.Info("    nvair get nodes -s %s", simResp.Title)
-	logging.Info("    nvair get forwards -s %s", simResp.Title)
+	logging.Info("    nvair get nodes -s %s", simResp.Name)
+	logging.Info("    nvair get forwards -s %s", simResp.Name)
 	return nil
 }
 

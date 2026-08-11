@@ -36,6 +36,14 @@ func validateGenericUbuntuNodeNetplans(directory string, topo *topology.RawTopol
 		}
 
 		configPath := filepath.Join(directory, nodeName+".yaml")
+		if _, err := os.Stat(configPath); err != nil {
+			if os.IsNotExist(err) {
+				logging.Warn("Netplan config not found for generic node %s at %s; skipping validation for this node.", nodeName, configPath)
+				continue
+			}
+			return fmt.Errorf("stat netplan config for generic node %s: %w", nodeName, err)
+		}
+
 		if _, err := netplan.LoadFile(configPath); err != nil {
 			return fmt.Errorf("invalid netplan config for generic node %s: %w", nodeName, err)
 		}

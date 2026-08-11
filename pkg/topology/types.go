@@ -3,7 +3,7 @@ package topology
 // RawTopology represents the actual topology.json file format from NVIDIA Air API
 type RawTopology struct {
 	Format  string             `json:"format"`
-	Title   string             `json:"title"`
+	Name    string             `json:"name"`
 	ZTP     interface{}        `json:"ztp"`
 	Content RawTopologyContent `json:"content"`
 }
