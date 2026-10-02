@@ -68,7 +68,7 @@ Each GPU node has 8 NICs for GPU communication, organized into 2 leaf groups. Ea
 Before running the following command, you must log in to your NVIDIA Air account using
 `nvair login -u user@example.com -p <api-token>`.
 
-For more details, please refer to the [quickstart](../../docs/quickstart.md).
+For more details, please refer to the [usage examples](../../README.md#usage-examples).
 
 ### Create Simulation
 
@@ -111,4 +111,4 @@ nvair delete simulation <simulation-name>
 
 ## Custom Topologies
 
-For instructions on creating your own custom topology simulations, please refer to: [Custom Topology Simulation Guide](../docs/usage/custom-topology-simulation.md)
+For instructions on creating your own custom topology simulations, please refer to: [Custom Topology Simulation Guide](../../docs/usage/custom-topology-simulation.md)

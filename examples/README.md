@@ -13,7 +13,7 @@ The `examples/` directory provides common NVIDIA Air topology simulations for qu
 ## Quick Simulation Creation
 
 Before running the following command, you must log in to your NVIDIA Air account using
-`nvair login -u user@example.com -p <api-token>`. For more details, please refer to the [quickstart](../../docs/quickstart.md).
+`nvair login -u user@example.com -p <api-token>`. For more details, please refer to the [usage examples](../README.md#usage-examples).
 
 Use the following command to quickly create a simulation from an example topology:
 
