@@ -127,4 +127,6 @@ See the README or speckit help for more advanced usage.
   - **security**: Gosec scan, upload security report
 
 - **One-time setup**:
-  - Set `NV_AIR_USER` and `NV_AIR_TOKEN` in GitHub Actions secrets
+  - Set `NV_AIR_USER` and `NV_DSX_AIR_TOKEN` in GitHub Actions secrets.
+    The E2E workflow passes `NV_DSX_AIR_TOKEN` to the tests as the
+    `NV_AIR_TOKEN` environment variable used by the local E2E command above.
