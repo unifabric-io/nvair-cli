@@ -51,7 +51,14 @@ var (
 // ExecCommandViaBastion executes a command on target host via bastion host
 // It establishes connection through bastion using public key authentication and uses password auth to target
 func ExecCommandViaBastion(cfg BastionExecConfig) (*ExecResult, error) {
-	bastionClient, err := dialBastion(
+	return ExecCommandViaBastionContext(context.Background(), cfg)
+}
+
+// ExecCommandViaBastionContext is ExecCommandViaBastion bounded by ctx: cancelling ctx aborts the
+// bastion and target connection setup as well as the running command.
+func ExecCommandViaBastionContext(ctx context.Context, cfg BastionExecConfig) (*ExecResult, error) {
+	bastionClient, err := dialBastionContext(
+		ctx,
 		cfg.BastionUser,
 		cfg.BastionAddr,
 		cfg.BastionKey,
@@ -59,11 +66,14 @@ func ExecCommandViaBastion(cfg BastionExecConfig) (*ExecResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer bastionClient.Close()
+	defer func() { _ = bastionClient.Close() }()
+	// Closing the bastion client tears down every channel opened through it.
+	stop := context.AfterFunc(ctx, func() { _ = bastionClient.Close() })
+	defer stop()
 
 	conn, err := bastionClient.Dial("tcp", cfg.TargetAddr)
 	if err != nil {
-		return nil, fmt.Errorf("dial target via bastion failed: %w", err)
+		return nil, ctxErrOr(ctx, fmt.Errorf("dial target via bastion failed: %w", err))
 	}
 
 	targetClient, err := newTargetClient(
@@ -73,21 +83,46 @@ func ExecCommandViaBastion(cfg BastionExecConfig) (*ExecResult, error) {
 		cfg.TargetPass,
 	)
 	if err != nil {
-		return nil, err
+		return nil, ctxErrOr(ctx, err)
 	}
-	defer targetClient.Close()
+	defer func() { _ = targetClient.Close() }()
 
-	return execCommand(targetClient, cfg.Command)
+	res, err := execCommand(targetClient, cfg.Command)
+	if err != nil {
+		return nil, ctxErrOr(ctx, err)
+	}
+	return res, nil
 }
 
 // ExecCommandOnBastion executes a command directly on bastion host
 func ExecCommandOnBastion(cfg BastionExecConfig) (*ExecResult, error) {
-	bastionClient, err := dialBastion(cfg.BastionUser, cfg.BastionAddr, cfg.BastionKey)
+	return ExecCommandOnBastionContext(context.Background(), cfg)
+}
+
+// ExecCommandOnBastionContext is ExecCommandOnBastion bounded by ctx.
+func ExecCommandOnBastionContext(ctx context.Context, cfg BastionExecConfig) (*ExecResult, error) {
+	bastionClient, err := dialBastionContext(ctx, cfg.BastionUser, cfg.BastionAddr, cfg.BastionKey)
 	if err != nil {
 		return nil, err
 	}
-	defer bastionClient.Close()
-	return execCommand(bastionClient, cfg.Command)
+	defer func() { _ = bastionClient.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = bastionClient.Close() })
+	defer stop()
+
+	res, err := execCommand(bastionClient, cfg.Command)
+	if err != nil {
+		return nil, ctxErrOr(ctx, err)
+	}
+	return res, nil
+}
+
+// ctxErrOr returns the context error when ctx is done (the underlying error is then only a
+// side effect of closing the connection), otherwise err.
+func ctxErrOr(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return err
 }
 
 // InteractiveSessionViaBastion starts an interactive shell on target host via bastion.
@@ -188,6 +223,12 @@ func newTargetClient(
 
 // dialBastion creates an SSH client connection to bastion host using public key authentication
 func dialBastion(user, addr, keyPath string) (*ssh.Client, error) {
+	return dialBastionContext(context.Background(), user, addr, keyPath)
+}
+
+// dialBastionContext is dialBastion where both the TCP connect and the SSH handshake are
+// aborted when ctx is done.
+func dialBastionContext(ctx context.Context, user, addr, keyPath string) (*ssh.Client, error) {
 	keyBytes, err := os.ReadFile(keyPath)
 	if err != nil {
 		return nil, err
@@ -207,7 +248,27 @@ func dialBastion(user, addr, keyPath string) (*ssh.Client, error) {
 		Timeout:         bastionDialTimeout,
 	}
 
-	return ssh.Dial("tcp", addr, cfg)
+	dialer := net.Dialer{Timeout: bastionDialTimeout}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+
+	// The handshake has no deadline of its own; close the connection if ctx ends first.
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+	if !stop() {
+		if err == nil {
+			_ = sshConn.Close()
+		}
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	return ssh.NewClient(sshConn, chans, reqs), nil
 }
 
 // execCommand executes a command on SSH client and returns the result
@@ -367,7 +428,7 @@ func WaitPingViaBastion(ctx context.Context, cfg BastionExecConfig, timeout time
 		pingCfg := cfg
 		pingCfg.Command = fmt.Sprintf("ping -c1 -W6 %s", host)
 		logging.Verbose("%s ...", pingCfg.Command)
-		res, err := ExecCommandOnBastion(pingCfg)
+		res, err := ExecCommandOnBastionContext(ctx, pingCfg)
 		if err == nil && res != nil && res.ExitCode == 0 {
 			return nil
 		}
@@ -411,7 +472,7 @@ func WaitTCPViaBastion(ctx context.Context, cfg BastionExecConfig, addr string, 
 }
 
 func dialTCPViaBastion(ctx context.Context, cfg BastionExecConfig, addr string) error {
-	client, err := dialBastion(cfg.BastionUser, cfg.BastionAddr, cfg.BastionKey)
+	client, err := dialBastionContext(ctx, cfg.BastionUser, cfg.BastionAddr, cfg.BastionKey)
 	if err != nil {
 		return err
 	}

@@ -643,3 +643,85 @@ func TestWaitTCPViaBastion(t *testing.T) {
 		t.Fatalf("expected deadline exceeded, got: %v", err)
 	}
 }
+
+func TestExecCommandViaBastionContextCancel(t *testing.T) {
+	clientKey, clientSigner := generateSigner(t)
+	keyPath := writePrivateKey(t, clientKey)
+
+	targetAddr, stopTarget := startTargetSSHServer(t, "user", "pass", func(cmd string) (string, string, int) {
+		time.Sleep(5 * time.Second)
+		return "", "", 0
+	})
+	defer stopTarget()
+	bastionAddr, stopBastion := startBastionSSHServer(t, clientSigner.PublicKey(), func(cmd string) (string, string, int) {
+		return "", "", 0
+	})
+	defer stopBastion()
+
+	cfg := BastionExecConfig{
+		BastionUser: "bastion",
+		BastionAddr: bastionAddr,
+		BastionKey:  keyPath,
+		TargetUser:  "user",
+		TargetAddr:  targetAddr,
+		TargetPass:  "pass",
+		Command:     "sleep",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := ExecCommandViaBastionContext(ctx, cfg)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("command was not interrupted by the context, took %v", elapsed)
+	}
+}
+
+func TestExecCommandOnBastionContextCanceledBeforeDial(t *testing.T) {
+	clientKey, _ := generateSigner(t)
+	keyPath := writePrivateKey(t, clientKey)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cfg := BastionExecConfig{BastionUser: "bastion", BastionAddr: "127.0.0.1:1", BastionKey: keyPath, Command: "true"}
+	if _, err := ExecCommandOnBastionContext(ctx, cfg); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got: %v", err)
+	}
+}
+
+func TestWaitTCPViaBastionHonorsContextDuringHandshake(t *testing.T) {
+	clientKey, _ := generateSigner(t)
+	keyPath := writePrivateKey(t, clientKey)
+
+	// A listener that accepts but never speaks SSH stalls the handshake.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+		}
+	}()
+
+	cfg := BastionExecConfig{BastionUser: "bastion", BastionAddr: ln.Addr().String(), BastionKey: keyPath}
+
+	start := time.Now()
+	err = WaitTCPViaBastion(context.Background(), cfg, "127.0.0.1:22", 400*time.Millisecond)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("probe was not interrupted by the context, took %v", elapsed)
+	}
+}

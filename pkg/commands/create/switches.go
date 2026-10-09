@@ -233,7 +233,7 @@ func ensureSwitchMgmtIP(ctx context.Context, name string, cfg bastion.BastionExe
 		}
 
 		logging.Verbose("Restarting DHCP client on switch %s via %s", name, linkLocal)
-		res, err := bastion.ExecCommandViaBastion(kickCfg)
+		res, err := bastion.ExecCommandViaBastionContext(ctx, kickCfg)
 		switch {
 		case err != nil:
 			logging.Verbose("Restarting DHCP on switch %s failed: %v", name, err)

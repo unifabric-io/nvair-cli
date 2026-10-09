@@ -61,7 +61,8 @@ func resolveMgmtIPFromInterfaces(interfaces map[string]api.ManagementInterface) 
 }
 
 // ResolveMgmtMAC returns the MAC of the management interface that carries the
-// node management IP, falling back to the first interface that has a MAC.
+// management IP (as resolved by ResolveMgmtIP), falling back to the first interface that
+// has a MAC.
 func ResolveMgmtMAC(n api.Node) string {
 	names := make([]string, 0, len(n.ManagementInterfaces))
 	for name := range n.ManagementInterfaces {
@@ -69,7 +70,7 @@ func ResolveMgmtMAC(n api.Node) string {
 	}
 	sort.Strings(names)
 
-	mgmtIP := strings.TrimSpace(n.ManagementIP)
+	mgmtIP, _ := ResolveMgmtIP(n)
 	fallback := ""
 	for _, name := range names {
 		iface := n.ManagementInterfaces[name]
