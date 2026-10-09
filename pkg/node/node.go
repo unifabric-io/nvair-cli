@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 
@@ -57,6 +58,47 @@ func resolveMgmtIPFromInterfaces(interfaces map[string]api.ManagementInterface) 
 		}
 	}
 	return ""
+}
+
+// ResolveMgmtMAC returns the MAC of the management interface that carries the
+// node management IP, falling back to the first interface that has a MAC.
+func ResolveMgmtMAC(n api.Node) string {
+	names := make([]string, 0, len(n.ManagementInterfaces))
+	for name := range n.ManagementInterfaces {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	mgmtIP := strings.TrimSpace(n.ManagementIP)
+	fallback := ""
+	for _, name := range names {
+		iface := n.ManagementInterfaces[name]
+		mac := strings.TrimSpace(iface.MACAddress)
+		if mac == "" {
+			continue
+		}
+		if mgmtIP != "" && strings.TrimSpace(iface.IP) == mgmtIP {
+			return mac
+		}
+		if fallback == "" {
+			fallback = mac
+		}
+	}
+	return fallback
+}
+
+// LinkLocalFromMAC returns the EUI-64 IPv6 link-local address of a 48-bit MAC.
+func LinkLocalFromMAC(mac string) (string, error) {
+	hw, err := net.ParseMAC(strings.TrimSpace(mac))
+	if err != nil {
+		return "", fmt.Errorf("invalid MAC %q: %w", mac, err)
+	}
+	if len(hw) != 6 {
+		return "", fmt.Errorf("invalid MAC %q: expected 48 bits", mac)
+	}
+
+	ip := net.IP{0xfe, 0x80, 0, 0, 0, 0, 0, 0, hw[0] ^ 0x02, hw[1], hw[2], 0xff, 0xfe, hw[3], hw[4], hw[5]}
+	return ip.String(), nil
 }
 
 // ResolveImageID returns the node image identifier from the new top-level image

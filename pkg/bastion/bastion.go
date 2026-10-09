@@ -7,6 +7,8 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/unifabric-io/nvair-cli/pkg/logging"
@@ -34,6 +36,12 @@ type ExecResult struct {
 	Stderr   string
 	ExitCode int
 }
+
+const (
+	bastionDialTimeout  = 15 * time.Second
+	tcpProbeInterval    = 3 * time.Second
+	tcpProbeDialTimeout = 10 * time.Second
+)
 
 var (
 	startInteractiveSessionFn = startInteractiveSession
@@ -196,6 +204,7 @@ func dialBastion(user, addr, keyPath string) (*ssh.Client, error) {
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         bastionDialTimeout,
 	}
 
 	return ssh.Dial("tcp", addr, cfg)
@@ -340,10 +349,18 @@ func WaitPingViaBastion(ctx context.Context, cfg BastionExecConfig, timeout time
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	var lastErr error
+	timeoutErr := func() error {
+		if lastErr == nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%w (last error: %v)", ctx.Err(), lastErr)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return timeoutErr()
 		default:
 		}
 
@@ -354,10 +371,101 @@ func WaitPingViaBastion(ctx context.Context, cfg BastionExecConfig, timeout time
 		if err == nil && res != nil && res.ExitCode == 0 {
 			return nil
 		}
+		if err != nil {
+			lastErr = err
+		} else if res != nil {
+			lastErr = fmt.Errorf("ping exited with code %d: %s", res.ExitCode, lastLine(res.Stdout+res.Stderr))
+		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return timeoutErr()
 		case <-ticker.C:
 		}
 	}
+}
+
+// WaitTCPViaBastion waits until addr accepts a TCP connection dialed from the bastion.
+// addr may be an IPv6 link-local address with a zone, e.g. "[fe80::1%eth1]:22".
+func WaitTCPViaBastion(ctx context.Context, cfg BastionExecConfig, addr string, timeout time.Duration) error {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	ticker := time.NewTicker(tcpProbeInterval)
+	defer ticker.Stop()
+
+	var lastErr error
+	for {
+		logging.Verbose("tcp probe %s via bastion ...", addr)
+		if lastErr = dialTCPViaBastion(ctx, cfg, addr); lastErr == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w (last error: %v)", ctx.Err(), lastErr)
+		case <-ticker.C:
+		}
+	}
+}
+
+func dialTCPViaBastion(ctx context.Context, cfg BastionExecConfig, addr string) error {
+	client, err := dialBastion(cfg.BastionUser, cfg.BastionAddr, cfg.BastionKey)
+	if err != nil {
+		return err
+	}
+	// Closing the client also unblocks a pending Dial below.
+	defer func() { _ = client.Close() }()
+
+	type dialResult struct {
+		conn net.Conn
+		err  error
+	}
+	resCh := make(chan dialResult, 1)
+	go func() {
+		conn, err := client.Dial("tcp", addr)
+		resCh <- dialResult{conn, err}
+	}()
+
+	select {
+	case res := <-resCh:
+		if res.err != nil {
+			return res.err
+		}
+		return res.conn.Close()
+	case <-time.After(tcpProbeDialTimeout):
+		return fmt.Errorf("dial %s via bastion timed out after %v", addr, tcpProbeDialTimeout)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+var routeDevRe = regexp.MustCompile(`\bdev\s+([A-Za-z0-9_.-]+)`)
+
+// ResolveInterfaceViaBastion returns the bastion network interface used to reach targetIP.
+func ResolveInterfaceViaBastion(cfg BastionExecConfig, targetIP string) (string, error) {
+	if net.ParseIP(targetIP) == nil {
+		return "", fmt.Errorf("invalid target IP %q", targetIP)
+	}
+
+	cfg.Command = fmt.Sprintf("ip -o route get %s", targetIP)
+	res, err := ExecCommandOnBastion(cfg)
+	if err != nil {
+		return "", err
+	}
+	if res.ExitCode != 0 {
+		return "", fmt.Errorf("ip route get exited with code %d: %s", res.ExitCode, lastLine(res.Stdout+res.Stderr))
+	}
+
+	m := routeDevRe.FindStringSubmatch(res.Stdout)
+	if m == nil {
+		return "", fmt.Errorf("no interface found in route output %q", strings.TrimSpace(res.Stdout))
+	}
+	return m[1], nil
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }

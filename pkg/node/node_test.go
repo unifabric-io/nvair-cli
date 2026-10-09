@@ -403,3 +403,70 @@ func BenchmarkSortNodesByName(b *testing.B) {
 		SortNodesByName(nodesCopy)
 	}
 }
+
+func TestLinkLocalFromMAC(t *testing.T) {
+	tests := []struct {
+		mac     string
+		want    string
+		wantErr bool
+	}{
+		{mac: "48:B0:2D:00:00:03", want: "fe80::4ab0:2dff:fe00:3"},
+		{mac: "48:b0:2d:00:04:7c", want: "fe80::4ab0:2dff:fe00:47c"},
+		{mac: "4a:b0:2d:00:00:03", want: "fe80::48b0:2dff:fe00:3"},
+		{mac: " 00:00:00:00:00:00 ", want: "fe80::200:ff:fe00:0"},
+		{mac: "", wantErr: true},
+		{mac: "not-a-mac", wantErr: true},
+		{mac: "48:b0:2d:00:00:03:00:01", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.mac, func(t *testing.T) {
+			got, err := LinkLocalFromMAC(tt.mac)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("LinkLocalFromMAC(%q) error = %v, wantErr %v", tt.mac, err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("LinkLocalFromMAC(%q) = %q, want %q", tt.mac, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveMgmtMAC(t *testing.T) {
+	tests := []struct {
+		name string
+		node api.Node
+		want string
+	}{
+		{name: "no interfaces", node: api.Node{}, want: ""},
+		{
+			name: "interface carrying the management IP wins",
+			node: api.Node{
+				ManagementIP: "10.0.0.2",
+				ManagementInterfaces: map[string]api.ManagementInterface{
+					"eth0": {IP: "10.0.0.1", MACAddress: "48:B0:2D:00:00:01"},
+					"eth1": {IP: "10.0.0.2", MACAddress: "48:B0:2D:00:00:02"},
+				},
+			},
+			want: "48:B0:2D:00:00:02",
+		},
+		{
+			name: "falls back to first interface with a MAC",
+			node: api.Node{
+				ManagementInterfaces: map[string]api.ManagementInterface{
+					"eth0": {IP: "10.0.0.1"},
+					"eth1": {IP: "10.0.0.2", MACAddress: " 48:B0:2D:00:00:02 "},
+				},
+			},
+			want: "48:B0:2D:00:00:02",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveMgmtMAC(tt.node); got != tt.want {
+				t.Fatalf("ResolveMgmtMAC() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
