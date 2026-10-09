@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -546,5 +547,99 @@ func TestWaitPingViaBastionTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "deadline") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWaitPingViaBastionTimeoutIncludesLastError(t *testing.T) {
+	clientKey, clientSigner := generateSigner(t)
+	keyPath := writePrivateKey(t, clientKey)
+
+	bastionAddr, stopBastion := startBastionSSHServer(t, clientSigner.PublicKey(), func(cmd string) (string, string, int) {
+		return "", "Destination Host Unreachable", 1
+	})
+	defer stopBastion()
+
+	cfg := BastionExecConfig{
+		BastionUser: "bastion",
+		BastionAddr: bastionAddr,
+		BastionKey:  keyPath,
+		TargetAddr:  "10.0.0.1:22",
+	}
+
+	err := WaitPingViaBastion(context.Background(), cfg, 200*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected timeout error, got nil")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Destination Host Unreachable") {
+		t.Fatalf("expected last ping error in message, got: %v", err)
+	}
+}
+
+func TestResolveInterfaceViaBastion(t *testing.T) {
+	clientKey, clientSigner := generateSigner(t)
+	keyPath := writePrivateKey(t, clientKey)
+
+	bastionAddr, stopBastion := startBastionSSHServer(t, clientSigner.PublicKey(), func(cmd string) (string, string, int) {
+		if cmd == "ip -o route get 192.168.200.111" {
+			return "192.168.200.111 dev eth1 src 192.168.200.1 uid 1000 \\    cache\n", "", 0
+		}
+		return "", "unexpected command: " + cmd, 1
+	})
+	defer stopBastion()
+
+	cfg := BastionExecConfig{BastionUser: "bastion", BastionAddr: bastionAddr, BastionKey: keyPath}
+
+	got, err := ResolveInterfaceViaBastion(cfg, "192.168.200.111")
+	if err != nil {
+		t.Fatalf("ResolveInterfaceViaBastion error: %v", err)
+	}
+	if got != "eth1" {
+		t.Fatalf("interface = %q, want eth1", got)
+	}
+
+	if _, err := ResolveInterfaceViaBastion(cfg, "1.2.3.4; reboot"); err == nil {
+		t.Fatalf("expected error for invalid target IP")
+	}
+}
+
+func TestWaitTCPViaBastion(t *testing.T) {
+	clientKey, clientSigner := generateSigner(t)
+	keyPath := writePrivateKey(t, clientKey)
+
+	bastionAddr, stopBastion := startBastionSSHServer(t, clientSigner.PublicKey(), func(cmd string) (string, string, int) {
+		return "", "", 0
+	})
+	defer stopBastion()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	openAddr := ln.Addr().String()
+	defer func() { _ = ln.Close() }()
+
+	cfg := BastionExecConfig{BastionUser: "bastion", BastionAddr: bastionAddr, BastionKey: keyPath}
+
+	if err := WaitTCPViaBastion(context.Background(), cfg, openAddr, 5*time.Second); err != nil {
+		t.Fatalf("expected open port to be reachable: %v", err)
+	}
+
+	// A closed port is refused from the bastion side, so the wait must time out.
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	closedAddr := closed.Addr().String()
+	_ = closed.Close()
+
+	err = WaitTCPViaBastion(context.Background(), cfg, closedAddr, 300*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected timeout for closed port")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got: %v", err)
 	}
 }
