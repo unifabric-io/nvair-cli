@@ -451,6 +451,16 @@ func TestResolveMgmtMAC(t *testing.T) {
 			want: "48:B0:2D:00:00:02",
 		},
 		{
+			name: "management IP only in interfaces selects its interface",
+			node: api.Node{
+				ManagementInterfaces: map[string]api.ManagementInterface{
+					"eth0": {MACAddress: "48:B0:2D:00:00:01"},
+					"eth1": {IP: "10.0.0.2", MACAddress: "48:B0:2D:00:00:02"},
+				},
+			},
+			want: "48:B0:2D:00:00:02",
+		},
+		{
 			name: "falls back to first interface with a MAC",
 			node: api.Node{
 				ManagementInterfaces: map[string]api.ManagementInterface{

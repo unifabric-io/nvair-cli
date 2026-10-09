@@ -23,7 +23,7 @@
 - Symptom: `switch <name> unreachable: context deadline exceeded` while resetting switch passwords.
 - Cause: a Cumulus switch can miss its first DHCP round on the management network (the OOB switch is not forwarding yet) and then waits minutes before its DHCP client retries, so its management IP does not answer even though it has booted.
 - `nvair create` reaches the switch over its IPv6 link-local address (derived from the management MAC) through the bastion, resets the password, and restarts DHCP so the management IP comes up immediately. It falls back to pinging the management IP for up to 20 minutes when link-local is unavailable.
-- To investigate manually, SSH to the bastion and run `ping <switch-mgmt-ip>` and `ip neigh`. An `INCOMPLETE` neighbor entry means the switch has not obtained its lease yet.
+- To investigate manually, SSH to the bastion and run `ping <switch-mgmt-ip>` and `ip neigh`. An `INCOMPLETE` neighbor entry only means the bastion got no answer to neighbor discovery. It can mean the switch has not obtained its lease yet, but also that the switch is down or there is an L2 connectivity problem, so check the switch state too.
 - Re-run with `--verbose` to see the last probe error and which path (link-local or management IP) was used.
 
 ## Command timeout or unexpected errors
