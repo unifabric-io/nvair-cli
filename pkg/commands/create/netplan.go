@@ -1,6 +1,7 @@
 package create
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,13 +55,22 @@ func validateGenericUbuntuNodeNetplans(directory string, topo *topology.RawTopol
 	return nil
 }
 
-func uploadNetplanConfigs(directory string, nodeNetplanTargets []api.Node, bastionAddr, keyPath string) error {
+func uploadNetplanConfigs(ctx context.Context, directory string, nodeNetplanTargets []api.Node, bastionAddr, keyPath string) error {
 	logging.Info("Uploading netplan configs on nodes via bastion...")
 
 	if len(nodeNetplanTargets) == 0 {
 		logging.Info("No compute nodes found for netplan upload, skipping")
 		return nil
 	}
+
+	baseCfg := bastion.BastionExecConfig{
+		BastionUser: constant.DefaultUbuntuUser,
+		BastionAddr: bastionAddr,
+		BastionKey:  keyPath,
+		TargetUser:  constant.DefaultUbuntuUser,
+		TargetPass:  constant.DefaultUbuntuPassword,
+	}
+	oobIface := resolveBastionOOBInterface(nodeNetplanTargets, baseCfg)
 
 	errCh := make(chan error, len(nodeNetplanTargets))
 	var wg sync.WaitGroup
@@ -97,6 +107,27 @@ func uploadNetplanConfigs(directory string, nodeNetplanTargets []api.Node, basti
 				logging.Verbose("Stat netplan config failed for node %s: %v", n.Name, err)
 				errCh <- fmt.Errorf("stat netplan config failed for node %s: %w", n.Name, err)
 				return
+			}
+
+			// Nodes can miss their first DHCP round (the OOB switch is not forwarding
+			// yet) and then wait minutes for the client retry, so the management IP may
+			// not answer even though the node has booted. Probe the node at its
+			// link-local address as well and restart DHCP from there when needed.
+			linkLocal := linkLocalSSHAddr(n, oobIface)
+			_, viaLinkLocal, err := waitTargetReachable(ctx, "node", n.Name, baseCfg, mgmtIP, linkLocal)
+			if err != nil {
+				logging.Verbose("Node %s not reachable: %v", n.Name, err)
+				errCh <- fmt.Errorf("node %s unreachable: %w", n.Name, err)
+				return
+			}
+			if viaLinkLocal {
+				logging.Info("Node %s reachable via link-local %s, restarting DHCP...", n.Name, linkLocal)
+				if err := ensureMgmtIPViaDHCPKick(ctx, "node", n.Name, baseCfg, linkLocal, mgmtIP,
+					constant.DefaultUbuntuPassword, nodeKickDHCPScript); err != nil {
+					logging.Verbose("Node %s management IP not ready: %v", n.Name, err)
+					errCh <- err
+					return
+				}
 			}
 
 			tmpDst := constant.NetplanStagingRemotePath

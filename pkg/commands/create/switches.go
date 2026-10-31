@@ -20,18 +20,23 @@ import (
 )
 
 const (
-	// switchReadyTimeout bounds how long a switch may take to become reachable after the
-	// simulation is ACTIVE. Cumulus VX switches can lose their first DHCP round and then
+	// targetReadyTimeout bounds how long a switch or node may take to become reachable
+	// after the simulation is ACTIVE. Guests can lose their first DHCP round and then
 	// wait minutes for the client retry.
-	switchReadyTimeout = 20 * time.Minute
-	// switchMgmtIPTimeout bounds how long we wait for the management IP after restarting DHCP.
-	switchMgmtIPTimeout    = 2 * time.Minute
-	switchDHCPKickInterval = 5 * time.Second
-	switchProgressInterval = 30 * time.Second
+	targetReadyTimeout = 20 * time.Minute
+	// targetMgmtIPTimeout bounds how long we wait for the management IP after restarting DHCP.
+	targetMgmtIPTimeout    = 2 * time.Minute
+	targetDHCPKickInterval = 5 * time.Second
+	targetProgressInterval = 30 * time.Second
 
-	// kickDHCPScript restarts the eth0 DHCP client so the lease is requested right away
-	// instead of after the client's retry back-off.
+	// kickDHCPScript restarts the eth0 DHCP client on Cumulus switches so the lease is
+	// requested right away instead of after the client's retry back-off.
 	kickDHCPScript = `p=/run/dhclient.eth0.pid; if [ -f "$p" ]; then kill "$(cat "$p")" 2>/dev/null; fi; ifup --force eth0`
+
+	// nodeKickDHCPScript does the same for generic Ubuntu nodes, which manage eth0 with
+	// systemd-networkd (netplan) instead of ifupdown. The ifupdown/dhclient branches are
+	// kept as fallbacks for images that do not run systemd-networkd.
+	nodeKickDHCPScript = `if command -v networkctl >/dev/null 2>&1; then networkctl renew eth0 || systemctl restart systemd-networkd; elif [ -f /run/dhclient.eth0.pid ]; then kill "$(cat /run/dhclient.eth0.pid)" 2>/dev/null; ifup --force eth0; else dhclient -nw eth0; fi`
 )
 
 func resetSwitchPasswords(ctx context.Context, switchNodes []api.Node, bastionAddr, keyPath string) error {
@@ -71,8 +76,8 @@ func resetSwitchPasswords(ctx context.Context, switchNodes []api.Node, bastionAd
 				return
 			}
 
-			linkLocal := switchLinkLocalAddr(n, oobIface)
-			switchAddr, viaLinkLocal, err := waitSwitchReachable(ctx, n.Name, baseCfg, mgmtIP, linkLocal)
+			linkLocal := linkLocalSSHAddr(n, oobIface)
+			switchAddr, viaLinkLocal, err := waitTargetReachable(ctx, "switch", n.Name, baseCfg, mgmtIP, linkLocal)
 			if err != nil {
 				logging.Verbose("Switch %s not reachable: %v", n.Name, err)
 				errCh <- fmt.Errorf("switch %s unreachable: %w", n.Name, err)
@@ -141,9 +146,9 @@ func resolveBastionOOBInterface(switchNodes []api.Node, cfg bastion.BastionExecC
 	return ""
 }
 
-// switchLinkLocalAddr returns "[fe80::...%iface]:22" derived from the switch management
-// MAC, or "" when it cannot be derived. Link-local works before the switch gets a DHCP lease.
-func switchLinkLocalAddr(n api.Node, iface string) string {
+// linkLocalSSHAddr returns "[fe80::...%iface]:22" derived from the target's management
+// MAC, or "" when it cannot be derived. Link-local works before the target gets a DHCP lease.
+func linkLocalSSHAddr(n api.Node, iface string) string {
 	if iface == "" {
 		return ""
 	}
@@ -153,16 +158,16 @@ func switchLinkLocalAddr(n api.Node, iface string) string {
 	}
 	ll, err := node.LinkLocalFromMAC(mac)
 	if err != nil {
-		logging.Verbose("Switch %s link-local address unavailable: %v", n.Name, err)
+		logging.Verbose("Node %s link-local address unavailable: %v", n.Name, err)
 		return ""
 	}
 	return fmt.Sprintf("[%s%%%s]:22", ll, iface)
 }
 
-// waitSwitchReachable waits until the switch answers on its link-local address (independent
-// of DHCP) or on its management IP, whichever comes first.
-func waitSwitchReachable(ctx context.Context, name string, cfg bastion.BastionExecConfig, mgmtIP, linkLocal string) (string, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, switchReadyTimeout)
+// waitTargetReachable waits until the switch or node answers on its link-local address
+// (independent of DHCP) or on its management IP, whichever comes first.
+func waitTargetReachable(ctx context.Context, kind, name string, cfg bastion.BastionExecConfig, mgmtIP, linkLocal string) (string, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, targetReadyTimeout)
 	defer cancel()
 
 	type result struct {
@@ -188,7 +193,7 @@ func waitSwitchReachable(ctx context.Context, name string, cfg bastion.BastionEx
 		}()
 	}
 
-	ticker := time.NewTicker(switchProgressInterval)
+	ticker := time.NewTicker(targetProgressInterval)
 	defer ticker.Stop()
 	start := time.Now()
 
@@ -202,7 +207,7 @@ func waitSwitchReachable(ctx context.Context, name string, cfg bastion.BastionEx
 			}
 			errs = append(errs, r.err)
 		case <-ticker.C:
-			logging.Info("Still waiting for switch %s to become reachable (%s elapsed)...", name, time.Since(start).Round(time.Second))
+			logging.Info("Still waiting for %s %s to become reachable (%s elapsed)...", kind, name, time.Since(start).Round(time.Second))
 		}
 	}
 	return "", false, errors.Join(errs...)
@@ -211,7 +216,15 @@ func waitSwitchReachable(ctx context.Context, name string, cfg bastion.BastionEx
 // ensureSwitchMgmtIP makes the switch request its DHCP lease right away and waits until the
 // management IP answers, instead of waiting for the DHCP client retry back-off.
 func ensureSwitchMgmtIP(ctx context.Context, name string, cfg bastion.BastionExecConfig, linkLocal, mgmtIP string) error {
-	ctx, cancel := context.WithTimeout(ctx, switchMgmtIPTimeout)
+	return ensureMgmtIPViaDHCPKick(ctx, "switch", name, cfg, linkLocal, mgmtIP,
+		constant.DefaultCumulusNewPassword, kickDHCPScript)
+}
+
+// ensureMgmtIPViaDHCPKick makes the target request its DHCP lease right away over its
+// link-local address and waits until the management IP answers, instead of waiting for
+// the DHCP client retry back-off.
+func ensureMgmtIPViaDHCPKick(ctx context.Context, kind, name string, cfg bastion.BastionExecConfig, linkLocal, mgmtIP, sudoPassword, kickScript string) error {
+	ctx, cancel := context.WithTimeout(ctx, targetMgmtIPTimeout)
 	defer cancel()
 
 	pingCfg := cfg
@@ -219,26 +232,26 @@ func ensureSwitchMgmtIP(ctx context.Context, name string, cfg bastion.BastionExe
 
 	kickCfg := cfg
 	kickCfg.TargetAddr = linkLocal
-	kickCfg.TargetPass = constant.DefaultCumulusNewPassword
+	kickCfg.TargetPass = sudoPassword
 	kickCfg.Command = fmt.Sprintf("printf '%%s\\n' %s | sudo -S -p '' sh -c %s",
-		shellQuote(constant.DefaultCumulusNewPassword), shellQuote(kickDHCPScript))
+		shellQuote(sudoPassword), shellQuote(kickScript))
 
 	for {
-		if err := bastion.WaitPingViaBastion(ctx, pingCfg, switchDHCPKickInterval); err == nil {
-			logging.Info("✓ Switch %s management IP %s is reachable.", name, mgmtIP)
+		if err := bastion.WaitPingViaBastion(ctx, pingCfg, targetDHCPKickInterval); err == nil {
+			logging.Info("✓ The %s %s management IP %s is reachable.", kind, name, mgmtIP)
 			return nil
 		}
 		if ctx.Err() != nil {
-			return fmt.Errorf("switch %s management IP %s not reachable after restarting DHCP: %w", name, mgmtIP, ctx.Err())
+			return fmt.Errorf("%s %s management IP %s not reachable after restarting DHCP: %w", kind, name, mgmtIP, ctx.Err())
 		}
 
-		logging.Verbose("Restarting DHCP client on switch %s via %s", name, linkLocal)
+		logging.Verbose("Restarting DHCP client on %s %s via %s", kind, name, linkLocal)
 		res, err := bastion.ExecCommandViaBastionContext(ctx, kickCfg)
 		switch {
 		case err != nil:
-			logging.Verbose("Restarting DHCP on switch %s failed: %v", name, err)
+			logging.Verbose("Restarting DHCP on %s %s failed: %v", kind, name, err)
 		case res.ExitCode != 0:
-			logging.Verbose("Restarting DHCP on switch %s exited with %d: %s", name, res.ExitCode, strings.TrimSpace(res.Stderr))
+			logging.Verbose("Restarting DHCP on %s %s exited with %d: %s", kind, name, res.ExitCode, strings.TrimSpace(res.Stderr))
 		}
 	}
 }

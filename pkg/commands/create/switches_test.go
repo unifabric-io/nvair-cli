@@ -14,13 +14,13 @@ func TestSwitchLinkLocalAddr(t *testing.T) {
 		},
 	}
 
-	if got, want := switchLinkLocalAddr(n, "eth1"), "[fe80::4ab0:2dff:fe00:3%eth1]:22"; got != want {
-		t.Fatalf("switchLinkLocalAddr() = %q, want %q", got, want)
+	if got, want := linkLocalSSHAddr(n, "eth1"), "[fe80::4ab0:2dff:fe00:3%eth1]:22"; got != want {
+		t.Fatalf("linkLocalSSHAddr() = %q, want %q", got, want)
 	}
-	if got := switchLinkLocalAddr(n, ""); got != "" {
+	if got := linkLocalSSHAddr(n, ""); got != "" {
 		t.Fatalf("expected empty address without interface, got %q", got)
 	}
-	if got := switchLinkLocalAddr(api.Node{Name: "no-mac"}, "eth1"); got != "" {
+	if got := linkLocalSSHAddr(api.Node{Name: "no-mac"}, "eth1"); got != "" {
 		t.Fatalf("expected empty address without MAC, got %q", got)
 	}
 }

@@ -26,6 +26,13 @@
 - To investigate manually, SSH to the bastion and run `ping <switch-mgmt-ip>` and `ip neigh`. An `INCOMPLETE` neighbor entry only means the bastion got no answer to neighbor discovery. It can mean the switch has not obtained its lease yet, but also that the switch is down or there is an L2 connectivity problem, so check the switch state too.
 - Re-run with `--verbose` to see the last probe error and which path (link-local or management IP) was used.
 
+## Node unreachable / `upload netplan for node <name> failed` during `nvair create`
+- Symptom: `upload netplan for node <name> failed: dial target via bastion failed: ssh: rejected: connect failed (Connection refused / No route to host)` while uploading netplan configs.
+- Cause: like switches, a generic Ubuntu node can miss its first DHCP round on the management network and then waits minutes before its DHCP client retries, so its management IP does not answer even though the node has booted.
+- `nvair create` probes the node over its IPv6 link-local address (derived from the management MAC) through the bastion and restarts DHCP (`networkctl renew`, falling back to ifupdown/dhclient) so the management IP comes up immediately. It falls back to pinging the management IP for up to 20 minutes when link-local is unavailable.
+- To investigate manually, SSH to the bastion and run `ping <node-mgmt-ip>` and `ip neigh`, and check the node console in the Air UI.
+- Re-run with `--verbose` to see the last probe error and which path (link-local or management IP) was used.
+
 ## Command timeout or unexpected errors
 - Re-run with `--verbose` to get detailed logs including:
   - API endpoint calls and response codes
