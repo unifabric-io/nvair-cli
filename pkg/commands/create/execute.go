@@ -203,7 +203,7 @@ func (cc *Command) Execute() error {
 	}
 
 	netplanTargets := filterGenericUbuntuNodes(nodes)
-	if err := uploadNetplanConfigs(cc.Directory, netplanTargets, bastionAddr, keyPath); err != nil {
+	if err := uploadNetplanConfigs(context.Background(), cc.Directory, netplanTargets, bastionAddr, keyPath); err != nil {
 		return err
 	}
 
